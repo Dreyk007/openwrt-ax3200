@@ -77,3 +77,52 @@ Remove an item when it is done.
     `/lib/apk/packages/<name>.list` before the transaction.
   - A config deleted any other way, e.g. by a replacement, must still be reported.
   - Test without reflashing as [AGENTS.md](AGENTS.md#building-and-testing) describes.
+- **GCC 15.3.0.** In OpenWrt main since 2026-06-27 (`97424f9c86`), not in 25.12. Take it with the
+  next release.
+  - It fixes 15.2 regressions that match this build (aarch64, `-O2`, C23 by default):
+    [PR 122572](https://gcc.gnu.org/PR122572) (a C23 struct tag aliasing bug that crashed a
+    Debian package on aarch64 at `-O2`), [PR 123002](https://gcc.gnu.org/PR123002) (vectorized
+    widening multiplications) and [PR 125250](https://gcc.gnu.org/PR125250) (wrong code at
+    `-O1`+). None was seen on the router; main needed only an arm32 mbedtls fix after the update.
+  - Cherry-pick `d8458334a7`, `59c07e6053`, `97424f9c86` with `-x`, in this order: the last one
+    alone conflicts. They applied cleanly to `xq-25.12` on 2026-10-31.
+  - Set `CONFIG_GCC_VERSION="15.3.0"` in the seed, update "GCC 15.2.0" in `README.md` and
+    `README.ru.md`, list the toolchain changes in `UPGRADING.md` section 1.2.
+  - The toolchain is rebuilt in full. Check the kernel configuration against the official one
+    ([UPGRADING.md 2.7](UPGRADING.md#27-check-kernel-configuration-parity-with-the-official-build))
+    and test on the router.
+- **ca-certificates: distrust "emSign ECC Root CA - G3"** (`4a686570eb` in `openwrt-25.12`, not in
+  25.12.6). The root issued intermediate certificates with 8-bit private keys, so anyone can make
+  a certificate the router trusts.
+  - On this build TLS protects DoH (`https-dns-proxy`) and the updater, which takes the image's
+    SHA256 from `release.json` over the same TLS. apk packages are signed separately.
+  - Cherry-pick it with `-x` into the next build if that comes before 25.12.7; it applied cleanly
+    on 2026-10-31. The merge of 25.12.7 then brings the same change.
+- **25.12.7 (Linux 6.12.113).** Merge the tag, not the branch: a newer kernel on 25.12.6 stops the
+  official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12` without
+  conflicts.
+  - `971` no longer applies: 6.12.113 sets `NF_FLOW_HW_DEAD` at the end of
+    `flow_offload_work_del()` ("netfilter: flowtable: generalize pending status bit"). Keep that
+    `set_bit()` as the last line of the function in both the removed and the added copy. With
+    that, all mt7622 patches applied at fuzz 0 to 6.12.113.
+  - The same release reworks the timeout extension of offloaded conntrack entries and makes the
+    flowtable GC wait for pending hardware work (`NF_FLOW_PENDING`). Repeat the accounting tests
+    of [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading),
+    including `975`'s own stats interval.
+  - It also brings the musl `regcomp` fix (CVE-2026-107891, toolchain rebuild), the dnsmasq fix
+    for slow loading of large hosts files, and a MT7622 Ethernet probe race fix
+    ("mtk_eth_soc: allocate dummy netdev sooner").
+- **Our patches and bridger on the next release** (25.12.7 or a new series).
+  - Go through "When upstream merges" above and the table in
+    [AGENTS.md](AGENTS.md#upstream-contributions): drop what the release already has (`970`–`976`,
+    `799-0*`, `feeds-patches/luci/`, bridger `patches/100-…`), refresh the rest at fuzz 0.
+  - If 25.12 backports nbd's mtk_wed fixes or "mtk_eth_soc: query the wireless driver for the TID
+    of flows" (pending-6.18 since 2026-10-28), check that `970`–`976` still apply and repeat the
+    accounting tests.
+  - bridger: if the release updates the package, keep `4b63ed4` or newer and check that
+    `patches/100-…` still applies. Then test with bridger on (operating mode *Maximum
+    throughput*), as in [RESEARCH.md section 11](RESEARCH.md#11-wi-fi--lan-throughput-and-bridger):
+    two wired → Wi-Fi transfers one after the other must both go through the hardware (`Sent
+    hardware` grows in `tc -s filter show dev eth0 ingress`; the second one checks `976`), and a
+    Wi-Fi client reconnect, `wifi` and `kill -9` of bridger must not stall traffic
+    (`patches/100-…`). Switch back to the default mode afterwards.
