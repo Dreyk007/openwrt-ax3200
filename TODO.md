@@ -101,6 +101,7 @@ Remove an item when it is done.
 - **25.12.7 (Linux 6.12.113).** Merge the tag, not the branch: a newer kernel on 25.12.6 stops the
   official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12` without
   conflicts.
+  - Drop `977`: 6.12.113 has the CVE-2026-98432 fix.
   - `971` no longer applies: 6.12.113 sets `NF_FLOW_HW_DEAD` at the end of
     `flow_offload_work_del()` ("netfilter: flowtable: generalize pending status bit"). Keep that
     `set_bit()` as the last line of the function in both the removed and the added copy. With
