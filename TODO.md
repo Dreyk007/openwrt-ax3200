@@ -32,6 +32,11 @@ Remove an item when it is done.
   - Drop `feeds-patches/luci/` once the LuCI branch of the build has it.
 - **[nbd168/bridger#17](https://github.com/nbd168/bridger/pull/17).** No review yet; ping it after
   2026-11-04. Drop `patches/100-…` once the fix is in bridger and OpenWrt's package.
+- **`978` (`pskb_expand_head()` without `BUG()`).** net-next `c7d8bc3dd511`, not marked for stable, so
+  6.12 will not get it. Drop it once the kernel of the build has it. A `WARNING` from
+  `pskb_expand_head()` in a user's log shows where the shared skb comes from: compare with
+  [openwrt/openwrt#26151](https://github.com/openwrt/openwrt/issues/26151), where fraglist GRO
+  (`rx-gro-list`, on by default in OpenWrt) is suspected.
 - **bridger version.** The build has `4b63ed4` (2026-10-27), OpenWrt main has `2a2d126`. Do not go back
   when OpenWrt updates the package. Optionally submit "bridger: update to Git HEAD (2026-10-27)" to
   OpenWrt.

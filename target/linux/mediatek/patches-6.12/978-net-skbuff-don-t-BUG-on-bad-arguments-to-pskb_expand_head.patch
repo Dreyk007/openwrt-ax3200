@@ -1,0 +1,49 @@
+From c7d8bc3dd511dac309754543d3063f3950b364c2 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Wed, 7 Oct 2026 17:36:00 +0000
+Subject: [PATCH] net: skbuff: don't BUG() on bad arguments to pskb_expand_head()
+
+pskb_expand_head() BUG()s if it is handed a negative nhead or a shared
+skb.  Both are bugs in the caller, and both keep getting hit: commit
+2cbb259ec4f8 ("bpf: Reject negative head_room in __bpf_skb_change_head")
+and commit 64e6a754d33d ("llc: do not use skb_get() before
+dev_queue_xmit()") each fixed a crash here that took down the whole box.
+
+The function already returns an error that every caller has to handle,
+and at this point it hasn't touched the skb.  Return -EINVAL instead of
+crashing.  The warning is DEBUG_NET_WARN_ON_ONCE(), so debug kernels
+still point at the caller, while production kernels, including ones
+running with panic_on_warn, just fail the call.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Link: https://patch.msgid.link/20261007-b4-skbuff-bug-on-v2-1-b9a5f732895b@toxicpanda.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+
+[ Backport to 6.12 for the AX3200 build: WARN_ON_ONCE() instead of
+  DEBUG_NET_WARN_ON_ONCE(), because the build has no CONFIG_DEBUG_NET and
+  the warning is the only trace of the shared skb that NFQUEUE
+  reinjection hands to ip_forward() (openwrt/openwrt#26151). ]
+---
+ net/core/skbuff.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -2279,9 +2279,15 @@ int pskb_expand_head(struct sk_buff *skb
+ 	u8 *data;
+ 	int i;
+ 
+-	BUG_ON(nhead < 0);
++	if (unlikely(nhead < 0)) {
++		WARN_ON_ONCE(1);
++		return -EINVAL;
++	}
+ 
+-	BUG_ON(skb_shared(skb));
++	if (unlikely(skb_shared(skb))) {
++		WARN_ON_ONCE(1);
++		return -EINVAL;
++	}
+ 
+ 	skb_zcopy_downgrade_managed(skb);
+ 
