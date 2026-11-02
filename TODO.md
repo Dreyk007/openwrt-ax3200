@@ -70,18 +70,6 @@ Remove an item when it is done.
 
 ## Next releases
 
-- **Keep my packages reports a removed package's own config as changed.** Seen on the r11 → r12
-  update of 2026-10-30 with `luci-app-wol` removed.
-  - The new image brings that package back with its file in `/etc/config` (`luci-wol`). The
-    restore removes the package again, and apk deletes the file.
-  - The result then says "The packages changed these settings files: luci-wol", and the copy of
-    all settings stays in `/etc/fwupdate/config-before`.
-  - The user's settings never had that file: the removal on the old image deleted it there too.
-  - Fix in `changed_configs()` of `fwupdate-packages`: skip a file that is gone after the
-    transaction and belonged to a package the restore removed. Read those packages' files from
-    `/lib/apk/packages/<name>.list` before the transaction.
-  - A config deleted any other way, e.g. by a replacement, must still be reported.
-  - Test without reflashing as [AGENTS.md](AGENTS.md#building-and-testing) describes.
 - **GCC 15.3.0.** In OpenWrt main since 2026-06-27 (`97424f9c86`), not in 25.12. Take it with the
   next release.
   - It fixes 15.2 regressions that match this build (aarch64, `-O2`, C23 by default):

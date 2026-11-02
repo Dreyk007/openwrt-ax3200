@@ -315,11 +315,19 @@ function snapshot() {
 	system('rm -rf ' + SNAPSHOT + ' && mkdir -p ' + SNAPSHOT + ' && cp -a /etc/config/. ' + SNAPSHOT + '/');
 }
 
-function changed_configs() {
+// dropped: the files in /etc/config of the packages the restore removed
+function changed_configs(dropped) {
 	const changed = [];
-	for (let f in lsdir(SNAPSHOT) || [])
-		if (readfile(SNAPSHOT + '/' + f) != readfile('/etc/config/' + f))
-			push(changed, f);
+	for (let f in lsdir(SNAPSHOT) || []) {
+		const was = readfile(SNAPSHOT + '/' + f), now = readfile('/etc/config/' + f);
+		if (was == now)
+			continue;
+		// the image's own copy of such a file went with its package: the user's settings never had
+		// it, the removal on the old image deleted it there too
+		if (now == null && dropped[f] && was == readfile(ROM + '/etc/config/' + f))
+			continue;
+		push(changed, f);
+	}
 	return changed;
 }
 
@@ -413,7 +421,7 @@ function restore_once() {
 	const db = installed_db(), before = readfile(WORLD), cur = world(WORLD), in_cur = names(cur);
 	const res = { installed: [], deps: 0, removed: [], replaced: [], disabled: [], failed: [], manual: [], changed: [], wanted: [] };
 	const removes = filter(l.removed, (n) => in_cur[n] && db[n] && !is_protected(n));
-	const adds = [];
+	const adds = [], dropped = {};
 
 	for (let a in l.added) {
 		if (a.source == 'file') {
@@ -431,6 +439,13 @@ function restore_once() {
 		if (length(plan[0]) || length(plan[1])) {
 			put_world(target_world(cur, plan[0], plan[1]));
 			snapshot();
+			// apk deletes the file lists of the packages it removes
+			for (let n in plan[0])
+				for (let f in package_files(n)) {
+					const m = match(f, /^\/etc\/config\/([^\/]+)$/);
+					if (m)
+						dropped[m[1]] = true;
+				}
 			const t = run(APK + ' add');
 			if (t[0] != 0) {
 				revert(before);
@@ -506,7 +521,7 @@ function restore_once() {
 			push(res.disabled, svc);
 		}
 	}
-	res.changed = changed_configs();
+	res.changed = changed_configs(dropped);
 	// the earlier versions are only worth keeping when a package changed one
 	if (!length(res.changed))
 		system('rm -rf ' + SNAPSHOT);
