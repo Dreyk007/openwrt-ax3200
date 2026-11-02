@@ -198,7 +198,7 @@ Backing up the flash partitions, TFTP recovery and UART access are described on 
 The files of every change are listed in [UPGRADING.md](UPGRADING.md#12-this-builds-commits).
 
 ### 1. Compiler and CPU (`ARM Cortex-A53`)
-* **OpenWrt GCC 15.2.0 toolchain** (`CONFIG_GCC_USE_VERSION_15=y`) instead of the default GCC 14.3, with better instruction scheduling for the in-order Cortex-A53 pipeline (~241 KB smaller compressed SquashFS).
+* **OpenWrt GCC 15.3.0 toolchain** (`CONFIG_GCC_USE_VERSION_15=y`) instead of the default GCC 14.3, with better instruction scheduling for the in-order Cortex-A53 pipeline (~241 KB smaller compressed SquashFS).
 * **Compiler flags `-O2 -pipe -mcpu=cortex-a53+crypto+crc`:** upstream builds use `-Os`, which disables function/loop/jump alignment. The AX3200 has 128 MB of NAND, so this build trades size for speed with `-O2` and enables the ARMv8 **Crypto Extensions (AES, SHA1/SHA2, GHASH)** and **CRC32** instructions.
 * **Link-Time Optimization** (`CONFIG_USE_LTO=y`) and **dead code/data elimination** (`CONFIG_USE_GC_SECTIONS=y`) for userland packages.
 * **`FORTIFY_SOURCE=2`** (`CONFIG_PKG_FORTIFY_SOURCE_2=y`) instead of the default level 1. The other hardening options (stack protector for userland and kernel, full RELRO, PIE) and `sstrip -z` binary stripping are OpenWrt defaults and are kept as is.

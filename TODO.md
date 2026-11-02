@@ -70,20 +70,6 @@ Remove an item when it is done.
 
 ## Next releases
 
-- **GCC 15.3.0.** In OpenWrt main since 2026-06-27 (`97424f9c86`), not in 25.12. Take it with the
-  next release.
-  - It fixes 15.2 regressions that match this build (aarch64, `-O2`, C23 by default):
-    [PR 122572](https://gcc.gnu.org/PR122572) (a C23 struct tag aliasing bug that crashed a
-    Debian package on aarch64 at `-O2`), [PR 123002](https://gcc.gnu.org/PR123002) (vectorized
-    widening multiplications) and [PR 125250](https://gcc.gnu.org/PR125250) (wrong code at
-    `-O1`+). None was seen on the router; main needed only an arm32 mbedtls fix after the update.
-  - Cherry-pick `d8458334a7`, `59c07e6053`, `97424f9c86` with `-x`, in this order: the last one
-    alone conflicts. They applied cleanly to `xq-25.12` on 2026-10-31.
-  - Set `CONFIG_GCC_VERSION="15.3.0"` in the seed, update "GCC 15.2.0" in `README.md` and
-    `README.ru.md`, list the toolchain changes in `UPGRADING.md` section 1.2.
-  - The toolchain is rebuilt in full. Check the kernel configuration against the official one
-    ([UPGRADING.md 2.7](UPGRADING.md#27-check-kernel-configuration-parity-with-the-official-build))
-    and test on the router.
 - **ca-certificates: distrust "emSign ECC Root CA - G3"** (`4a686570eb` in `openwrt-25.12`, not in
   25.12.6). The root issued intermediate certificates with 8-bit private keys, so anyone can make
   a certificate the router trusts.

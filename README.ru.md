@@ -198,7 +198,7 @@ sysupgrade /tmp/openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupg
 Файлы каждого изменения перечислены в [UPGRADING.md](UPGRADING.md#12-this-builds-commits) (англ.).
 
 ### 1. Компилятор и процессор (`ARM Cortex-A53`)
-* **Тулчейн OpenWrt GCC 15.2.0** (`CONFIG_GCC_USE_VERSION_15=y`) вместо штатного GCC 14.3 — лучшее планирование инструкций для in-order конвейера Cortex-A53 (сжатый SquashFS меньше на ~241 КБ).
+* **Тулчейн OpenWrt GCC 15.3.0** (`CONFIG_GCC_USE_VERSION_15=y`) вместо штатного GCC 14.3 — лучшее планирование инструкций для in-order конвейера Cortex-A53 (сжатый SquashFS меньше на ~241 КБ).
 * **Флаги компиляции `-O2 -pipe -mcpu=cortex-a53+crypto+crc`:** официальные сборки используют `-Os`, при котором отключено выравнивание функций, циклов и переходов. У AX3200 128 МБ NAND, поэтому сборка жертвует размером ради скорости (`-O2`) и включает аппаратные инструкции **ARMv8 Crypto (AES, SHA1/SHA2, GHASH)** и **CRC32**.
 * **Link-Time Optimization** (`CONFIG_USE_LTO=y`) и **удаление неиспользуемого кода и данных** (`CONFIG_USE_GC_SECTIONS=y`) для пакетов userland.
 * **`FORTIFY_SOURCE=2`** (`CONFIG_PKG_FORTIFY_SOURCE_2=y`) вместо уровня 1 по умолчанию. Остальная защита (stack protector для userland и ядра, full RELRO, PIE) и очистка бинарников `sstrip -z` — это умолчания OpenWrt, они оставлены как есть.

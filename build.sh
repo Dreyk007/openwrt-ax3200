@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Automated build script for Xiaomi AX3200 / Redmi AX6S OpenWrt firmware
-# (MediaTek MT7622, aarch64_cortex-a53, GCC 15.2, musl libc)
+# (MediaTek MT7622, aarch64_cortex-a53, GCC 15.3, musl libc)
 #
 
 set -euo pipefail
