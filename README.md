@@ -243,6 +243,12 @@ The files of every change are listed in [UPGRADING.md](UPGRADING.md#12-this-buil
 * **LAN NTP server** (`system.ntp.enable_server='1'`).
 * **`zram-swap` 120 MB with `lz4`** (`CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y`) and `vm.swappiness=100`, `vm.page-cluster=0`, `vm.vfs_cache_pressure=50`.
 * **Services are restarted indefinitely** after crashes (procd `respawn_retry='0'`); `https-dns-proxy` tolerates WAN reconnects (`conn_loss_time='30'`).
+* **Fixes ahead of OpenWrt 25.12.7:**
+  * Linux kernel, CVE-2026-98432: a TCP connection to the router itself with crafted IPv4 options could crash it or corrupt kernel memory (the fix of Linux 6.12.113);
+  * no kernel panic when a program that handles traffic through NFQUEUE, such as `nfqws` of zapret, re-injects a packet the kernel does not expect: the packet is dropped and the kernel log shows a warning once (the random reboots of [openwrt/openwrt#26151](https://github.com/openwrt/openwrt/issues/26151));
+  * the root certificate "emSign ECC Root CA – G3" is no longer trusted: it issued certificates with keys anyone can recover;
+  * musl, CVE-2026-107891: integer overflows in regular expressions;
+  * dnsmasq: large hosts files, such as ad-blocking lists, load in seconds instead of minutes.
 
 ### 6. How the Defaults Are Applied (`99-custom-settings`)
 `uci-defaults` scripts run on the first boot after **every** flash, including a sysupgrade that keeps settings. `files/etc/uci-defaults/99-custom-settings` applies the settings from sections 2 and 5 and the DoH, statistics, DDNS autostart and LuCI theme defaults (see [Pre-installed packages](#pre-installed-packages)) **only once per configuration** and stores a marker in `/etc/config/ax3200`. Your own changes (for example HFO disabled in favour of SQM) are therefore preserved across upgrades. Only removing the collectd include of older builds runs on every flash. Two later defaults are also applied once to configurations upgraded from earlier builds: `bridger` off, and packet steering mode 2 instead of mode 1 (unless SQM is on). The list of LuCI themes is brought in line with the installed themes on every boot (`files/etc/init.d/luci-themes`), so this also works after restoring a settings backup made on another firmware. To re-apply the build defaults:

@@ -70,13 +70,6 @@ Remove an item when it is done.
 
 ## Next releases
 
-- **ca-certificates: distrust "emSign ECC Root CA - G3"** (`4a686570eb` in `openwrt-25.12`, not in
-  25.12.6). The root issued intermediate certificates with 8-bit private keys, so anyone can make
-  a certificate the router trusts.
-  - On this build TLS protects DoH (`https-dns-proxy`) and the updater, which takes the image's
-    SHA256 from `release.json` over the same TLS. apk packages are signed separately.
-  - Cherry-pick it with `-x` into the next build if that comes before 25.12.7; it applied cleanly
-    on 2026-10-31. The merge of 25.12.7 then brings the same change.
 - **25.12.7 (Linux 6.12.113).** Merge the tag, not the branch: a newer kernel on 25.12.6 stops the
   official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12` without
   conflicts.
@@ -89,9 +82,8 @@ Remove an item when it is done.
     flowtable GC wait for pending hardware work (`NF_FLOW_PENDING`). Repeat the accounting tests
     of [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading),
     including `975`'s own stats interval.
-  - It also brings the musl `regcomp` fix (CVE-2026-107891, toolchain rebuild), the dnsmasq fix
-    for slow loading of large hosts files, and a MT7622 Ethernet probe race fix
-    ("mtk_eth_soc: allocate dummy netdev sooner").
+  - The cherry-picked ca-certificates, musl and dnsmasq commits come with it unchanged. It also
+    brings a MT7622 Ethernet probe race fix ("mtk_eth_soc: allocate dummy netdev sooner").
 - **Our patches and bridger on the next release** (25.12.7 or a new series).
   - Go through "When upstream merges" above and the table in
     [AGENTS.md](AGENTS.md#upstream-contributions): drop what the release already has (`970`–`976`,
