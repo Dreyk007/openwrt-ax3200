@@ -356,7 +356,7 @@ Measured with a 2×2 HE160 laptop as the headset about 1 m from the router (link
   * `luci-app-tuning`: operating modes (*System → Operating mode*), a package of this build in `package/ax3200/`. It replaces `luci-app-cpufreq` of earlier builds: the CPU frequency governor is set on the same page;
   * `luci-app-fwupdate`: firmware updates (*System → AX3200 / AX6S build updates*), a package of this build in `package/ax3200/`;
   * `bridger`: wired → Wi-Fi traffic in hardware, off by default, enabled by the *Maximum throughput* mode ([section 2](#2-hardware-nat-and-wi-fi-6-acceleration-hfo--wed)).
-* **Monitoring and diagnostics:** `luci-app-nlbwmon` (per-client traffic accounting), `luci-app-statistics` (`collectd` graphs of CPU load and frequency, RAM, `br-lan`/`wan`, Wi-Fi, conntrack, hardware sensors and the MT7915E temperature; the `wan` graph includes offloaded traffic, see [Interface graphs with offloading](#2-hardware-nat-and-wi-fi-6-acceleration-hfo--wed)), `luci-app-ttyd` (web terminal), CLI tools `htop`, `nano`, `curl`, `iperf3`, `ethtool`, `tcpdump-mini`, `bind-dig`, `mtr-nojson`.
+* **Monitoring and diagnostics:** `luci-app-nlbwmon` (per-client traffic accounting), `luci-app-statistics` (`collectd` graphs of CPU load and frequency, RAM, `br-lan`/`wan`, Wi-Fi, conntrack, hardware sensors and the MT7915E temperature; the `wan` graph includes offloaded traffic, see [Interface graphs with offloading](#2-hardware-nat-and-wi-fi-6-acceleration-hfo--wed)), `luci-app-ttyd` (web terminal), CLI tools `htop`, `nano`, `curl`, `iperf3`, `ethtool`, `tcpdump-mini`, `bind-dig`, `mtr-nojson` and the full `ip` command (`ip-full`, which packages such as Steer of Zapret Manager need).
 
 ---
 
