@@ -384,3 +384,27 @@ Mode 2 is no worse: the differences are within the spread of single runs, and th
 | SQM | software | off | off | 1 | `performance` | on | §9: software offloading and mode 1 are the best SQM setup; WED is unused without hardware offloading, and bridger needs WED |
 
 The page applies a mode with a reboot: WED is a module parameter anyway, and one rule is simpler than settings that apply at different times. The `tuning` command applies everything but WED at once and reports when a reboot is needed.
+
+## 14. zapret and flow offloading
+
+**Setup:** users of the build run [zapret](https://github.com/bol-van/zapret) to get around DPI blocking, mostly through Zapret Manager, which installs the packages of [remittor/zapret-openwrt](https://github.com/remittor/zapret-openwrt). Tested on r13 (25.12.6, Linux 6.12.112) with zapret v72.20260307 and its default settings: nftables, hostlist mode, `FLOWOFFLOAD=none`; the first 9 packets of each TCP connection to port 443 go to `nfqws` through a queue in the postrouting hook (`ct original packets 1-9`); for `discord.com` the strategy sends a fake ClientHello for `rzd.ru` (`hostfakesplit`) before the split real one.
+
+**Method:** the provider of the test setup blocks nothing, so the question was whether `nfqws` gets to modify the ClientHello, not whether a site opens. One HTTPS request to `discord.com` (pinned to 162.159.137.232) per run; `tcpdump` on `wan`, filtered to that address, counts the fakes with `rzd.ru` (two per processed connection). Clients: the laptop on 5 GHz Wi-Fi and the build PC on `lan1`. Three runs per cell; the firewall was reloaded after each change.
+
+| Flow offloading | fw4 offload rule | Wi-Fi client | Wired client |
+|---|---|---|---|
+| hardware (*Balanced*, *Maximum throughput*, *Low latency*) | as shipped | 3/3 | **0/3** |
+| software (*SQM*) | as shipped | **0/3** | — |
+| none | — | 3/3 | 3/3 |
+| software | `ct original packets ge 30 flow offload @ft` | 3/3 | 3/3 |
+| hardware | `ct original packets ge 30 flow offload @ft` | 3/3 | 3/3 |
+
+* With flow offloading, fw4 adds a connection to the flowtable once its handshake is done, and the packets of a connection in the flowtable no longer pass the postrouting hook where zapret queues them. The ClientHello of a Wi-Fi client still got through with hardware offloading (its fast path starts later; not investigated further), that of a wired client did not.
+* With the rule changed to offload a connection only after its first 30 packets (the change Zapret Manager makes by itself), zapret processed every connection, and bulk traffic stayed in the hardware: a wired 1 GiB download ran at ~450 Mbit/s with the CPU 90 % idle and bound PPE entries.
+* Switching the operating modes with `tuning set` (throughput, sqm, lowlatency, balanced) kept zapret running: its rules are in their own table `inet zapret`, which the firewall reload does not touch; only the software offloading of the *SQM* mode stopped the ClientHello from reaching `nfqws`.
+* Zapret Manager 5.004 (installer `ZapretManager_LuCI.sh`, zapret installed with its panel action) installed `unzip` from the repository and zapret with its dependencies, and changed the fw4 rule to the 30-packet form by itself. With its strategy v7 (fakes carrying `stun.bin` for every HTTPS host not excluded) zapret processed the ClientHello for wired and Wi-Fi clients in all four modes, 2/2 each; only the first connection within a second of switching to *Maximum throughput* (bridger starting) went unprocessed, the following ones were processed.
+* A real update with *Keep my packages* (`fwupdate-packages request` and `sysupgrade` of the r13 release, as the update button does) kept `/etc/config/zapret`, the zapret lists under `/opt/zapret`, the backups of Zapret Manager (its `/lib/upgrade/keep.d` entry) and its cron jobs, which then call a missing script until it is installed again. The restore installed `unzip` again and listed `zapret` and `luci-app-zapret` as packages to install by hand. Zapret Manager and zapret then installed again without problems, the fw4 rule was changed again, and zapret worked for both clients; Zapret Manager set its base strategy again.
+* The kernel did not log the `pskb_expand_head()` warning of patch `978` during these tests.
+* Steer of Zapret Manager (its own proxy engine) did not install: `steer-core` depends on `ip-full`, and the image had `ip-tiny` in its world (pulled in by `sqm-scripts` and `ddns-scripts`), so apk refused the swap. `apk add ip-full '!ip-tiny'` fixes it; with `ip-full` in the seed, `make defconfig` drops `ip-tiny` and keeps both dependants. The AmneziaWG module that Steer adds for WARP matches the kernel of the build (same `kernel=` dependency and vermagic).
+
+**Decision:** hardware offloading stays the default. The README gets a section for zapret users with the 30-packet rule (Zapret Manager applies it itself), and the seed selects `ip-full` instead of `ip-tiny` (+77 KiB package). Changing the fw4 rule for everybody was not done: it would send the first 30 packets of every connection through the CPU on routers without zapret.

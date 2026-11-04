@@ -315,6 +315,17 @@ The choice is kept across sysupgrades (see [section 6](#6-how-the-defaults-are-a
 
 ---
 
+## zapret (only if you use it)
+
+This section is only for those who run zapret on the router to get around DPI blocking. Everyone else can skip it. Tested on this router with Zapret Manager 5.004 (the panel for LuCI) and the zapret it installs.
+
+* **Install zapret with Zapret Manager.** It sets the firewall up for this build by itself: with hardware offloading on, a connection goes to the hardware only after its first 30 packets. zapret then sees the start of every connection and works in all operating modes, while downloads still go through the hardware. Without this change zapret missed the connections of wired clients and, in the *SQM* mode, of all clients. Details: [RESEARCH.md](RESEARCH.md#14-zapret-and-flow-offloading).
+* **Operating modes** can be switched while zapret runs: it keeps working.
+* **Random reboots with zapret** are fixed in this build (r13): the official 25.12.6 kernel crashes on some packets that zapret hands back ([openwrt/openwrt#26151](https://github.com/openwrt/openwrt/issues/26151)); here only such a packet is dropped.
+* **Steer** of Zapret Manager needs the full `ip` command, which this build includes since r14. On r13 run `apk update && apk add ip-full '!ip-tiny'` before installing anything with Zapret Manager, or Steer will not install.
+* **IPv6:** zapret handles only IPv4 by default. If your provider gives you IPv6, devices may reach a site over IPv6 past zapret: enable IPv6 in Zapret Manager.
+* **After a firmware update** zapret is not installed again by itself, because it is installed from a file: the update page lists it among the packages to install by hand. Wait until that page shows the packages restored (the router restarts once more after installing them), then install Zapret Manager and zapret with it; the firewall is set up again as well. If the update kept the settings, the zapret settings are kept too, but Zapret Manager sets its own main strategy when it installs zapret: if you had chosen another one, choose it again.
+
 ## Wi-Fi at 160 MHz (HE160) and VR Streaming
 
 The 5 GHz radio defaults to **HE80 on channel 36** for the widest client compatibility. The MT7915E also supports **160 MHz (HE160)**, which doubles the link rate of the usual 2×2 clients (phones, laptops, VR headsets): up to 2402 Mbit/s instead of 1201 Mbit/s. At 160 MHz the radio uses 2 spatial streams instead of 4, so 3×3/4×4 clients gain less.
