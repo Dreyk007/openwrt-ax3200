@@ -15,22 +15,33 @@ Remove an item when it is done.
     `mtk_foe_entry_get_stats()`, not `mtk_foe_entry_get_mib()`.
   - nf-next goes into the next merge window, so 6.12 will not get it on its own.
 - **Pablo Neira Ayuso's "netfilter: flowtable: perform unbind callback on hook release"** (nf,
-  2026-10-28) and Paul-Louis Charrière's "netfilter: flowtable: remove hardware flows before
-  unbinding" fix what `972`/`973` fix: offloaded flows that stay in the PPE after a firewall reload.
+  2026-10-28), Paul-Louis Charrière's "netfilter: flowtable: remove hardware flows before
+  unbinding" and Arnau Valls's "netfilter: flowtable: remove hw flows before unbinding the flow
+  block" (nf, 2026-11-03, `Cc: stable`, tested on MT7981 with 6.12.74) fix what `972`/`973` fix:
+  offloaded flows that stay in the PPE after a firewall reload. A `Cc: stable` fix reaches 6.12 on
+  its own and may then conflict with `972`.
   - Once one is merged, repeat the firewall reload test of
     [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading) without
     `972`/`973`.
   - Drop them if it passes.
+- **João Silva's "netfilter: flowtable: do not clear the offload bit twice"** (2026-11-03; Pablo
+  asked for nf-next, so 6.12 will not get it on its own). A hardware flow that waits for its
+  deletion is torn down again by the next GC pass and clears `IPS_OFFLOAD_BIT` of the flow that
+  replaced it, so more flows pile up for one conntrack entry (seen on RTL930x). 6.12.113 has the
+  same `flow_offload_teardown()`. Not seen in the accounting tests on this router; consider it if
+  duplicate PPE entries for one connection show up.
 - **[openwrt/openwrt#26107](https://github.com/openwrt/openwrt/pull/26107).** `970` is its `736-06`;
   `971` is its `708`. Drop both once 25.12 carries it.
-- **[openwrt/openwrt#26178](https://github.com/openwrt/openwrt/pull/26178).**
-  - After the merge in main, submit the `[25.12]` backport.
-  - Drop `976` once 25.12 has it.
+- **`976`.** Main fixed the same line on 2026-11-03 with `042f7034ea` (Shi Jiayang,
+  `pending-6.18/967-44-…`), so our [openwrt/openwrt#26178](https://github.com/openwrt/openwrt/pull/26178)
+  was closed. The `[25.12]` backport, together with the bridger update, is
+  [openwrt/openwrt#26484](https://github.com/openwrt/openwrt/pull/26484).
+  - Drop `976` once 25.12 has `967-44` in `pending-6.12`: `976` no longer applies then.
 - **[openwrt/luci#9154](https://github.com/openwrt/luci/pull/9154).** Merged in master on 2026-10-30
   (`967b74154a`, `377df0286d`); `feeds-patches/luci/` carries these commits.
   - A cherry-pick into `openwrt-25.12` was requested on the PR on 2026-10-30.
   - Drop `feeds-patches/luci/` once the LuCI branch of the build has it.
-- **[nbd168/bridger#17](https://github.com/nbd168/bridger/pull/17).** No review yet; ping it after
+- **[nbd168/bridger#17](https://github.com/nbd168/bridger/pull/17).** No review yet; pinged on
   2026-11-04. Drop `patches/100-…` once the fix is in bridger and OpenWrt's package.
 - **`978` (`pskb_expand_head()` without `BUG()`).** net-next `c7d8bc3dd511`, not marked for stable, so
   6.12 will not get it. Drop it once the kernel of the build has it. A `WARNING` from
