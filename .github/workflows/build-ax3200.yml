@@ -197,7 +197,6 @@ jobs:
             echo
             echo "| File | Purpose |"
             echo "|---|---|"
-            echo "| \`$prefix-sysupgrade.ubi\` | Raw UBI image extracted from \`factory.bin\`; the installation methods in the README do not need it |"
             echo "| \`$prefix-ubi-loader.itb\` | Second-stage U-Boot (\`ubi-loader\`); \`sysupgrade\` does not update it |"
             echo "| \`$prefix-initramfs-recovery.itb\` | Initramfs recovery image (TFTP) |"
             echo "| \`mt7622-ram-1ddr-bl2.bin\`, \`mt7622-ram-2ddr-bl2.bin\` | BL2 that runs from RAM, for recovery over UART (e.g. \`mtk_uartboot\`) |"

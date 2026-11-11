@@ -235,7 +235,7 @@ if [ "$CCACHE" = 1 ] && [ -x staging_dir/host/bin/ccache ]; then
     CCACHE_DIR="$SCRIPT_DIR/.ccache" staging_dir/host/bin/ccache --zero-stats > /dev/null || true
 fi
 
-# 7. Post-process images: Extract raw UBI image and update sha256sums
+# 7. Check the factory.bin layout and write sha256sums
 TARGET_DIR="bin/targets/mediatek/mt7622"
 if [ ! -d "$TARGET_DIR" ]; then
     error "Target build directory '$TARGET_DIR' not found!"
@@ -243,29 +243,27 @@ if [ ! -d "$TARGET_DIR" ]; then
 fi
 
 FACTORY_BIN="$(find "$TARGET_DIR" -name "openwrt-*-factory.bin" | head -n 1)"
-UBI_IMG="$TARGET_DIR/openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi"
 
 if [ -n "$FACTORY_BIN" ] && [ -f "$FACTORY_BIN" ]; then
     # factory.bin = ubi-loader FIT padded to 512 KiB (size of the "ubi-loader"
-    # partition) + UBI image, see Device/xiaomi_redmi-router-ax6s in mt7622.mk
-    info "Extracting raw sysupgrade.ubi from factory.bin (offset 512KB)..."
+    # partition) + UBI image, see Device/xiaomi_redmi-router-ax6s in mt7622.mk.
+    # The README's upgrade from 23.05 (dd count=4 / skip=4 into the old 4 MiB
+    # "kernel" partition and "ubi") relies on this layout.
     if [ "$(dd if="$FACTORY_BIN" bs=1 skip=524288 count=4 status=none)" != "UBI#" ]; then
         error "No UBI image at offset 512KB in $FACTORY_BIN (factory.bin layout changed?)"
         exit 1
     fi
-    dd if="$FACTORY_BIN" of="$UBI_IMG" bs=512K skip=1 status=none
-    success "Created $UBI_IMG"
 else
-    warn "factory.bin not found; skipping sysupgrade.ubi extraction."
+    warn "factory.bin not found; skipping the factory.bin layout check."
 fi
 
-# 7. Generate and verify sha256sums
+# Generate and verify sha256sums
 info "Generating and validating sha256sums in $TARGET_DIR..."
 (
     cd "$TARGET_DIR"
     # Select all standard build artifacts
     FILES_TO_HASH=()
-    for f in config.buildinfo feeds.buildinfo mt7622-ram-*.bin openwrt-*-factory.bin openwrt-*-recovery.itb openwrt-*-sysupgrade.itb openwrt-*-sysupgrade.ubi openwrt-*-ubi-loader.itb openwrt-*.manifest profiles.json version.buildinfo; do
+    for f in config.buildinfo feeds.buildinfo mt7622-ram-*.bin openwrt-*-factory.bin openwrt-*-recovery.itb openwrt-*-sysupgrade.itb openwrt-*-ubi-loader.itb openwrt-*.manifest profiles.json version.buildinfo; do
         if [ -f "$f" ]; then
             FILES_TO_HASH+=("$f")
         fi

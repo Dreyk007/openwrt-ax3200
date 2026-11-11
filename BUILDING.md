@@ -7,7 +7,7 @@
 The repository root contains the seed configuration [`ax3200.config`](ax3200.config) (generated with `./scripts/diffconfig.sh`) and the rootfs overlay [`files/`](files/).
 
 ## Automated Build with `build.sh`
-[`build.sh`](build.sh) installs the build dependencies (optional, `apt`), updates the feeds, patches feed packages with `feeds-patches/<feed>/*.patch`, applies `ax3200.config`, synchronizes the kernel `vermagic` with the official repository or its mirrors (if no server answers, the list committed for this release is used; without one the build stops), compiles the firmware, extracts `sysupgrade.ubi` (checking the `factory.bin` layout) and writes `sha256sums`.
+[`build.sh`](build.sh) installs the build dependencies (optional, `apt`), updates the feeds, patches feed packages with `feeds-patches/<feed>/*.patch`, applies `ax3200.config`, synchronizes the kernel `vermagic` with the official repository or its mirrors (if no server answers, the list committed for this release is used; without one the build stops), compiles the firmware, checks the `factory.bin` layout and writes `sha256sums`.
 
 Because of `CONFIG_ALL_KMODS=y` (see [README, section 7](README.md#7-official-package-repository-compatibility-vermagic--apk)) all ~1100 kernel module packages are built: the first build takes noticeably longer and `bin/` grows to ~140 MB, while the firmware contains only the selected modules. `kmod-rtl8812au-ct` is excluded because it does not build with GCC 15 (the AX6S has no USB port).
 

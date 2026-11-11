@@ -55,7 +55,6 @@
 |---|---|
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-factory.bin` | Первая установка со стоковой прошивки (или с OpenWrt ≤ 23.05). Содержит `ubi-loader`, дополненный до 512 КБ, и следом UBI-образ. |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` | Штатное обновление с OpenWrt 24.10 / 25.12 (разметка UBI). |
-| `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi` | «Сырой» UBI-образ, извлечённый `build.sh` из `factory.bin`. Для способов установки ниже не нужен. |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-ubi-loader.itb` | Отдельно загрузчик второго уровня (`ubi-loader`). |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-initramfs-recovery.itb` | Initramfs-образ для восстановления (TFTP). |
 
