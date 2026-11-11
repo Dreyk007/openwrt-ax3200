@@ -47,7 +47,7 @@ The goal of the build is **line-rate 1 Gbps wired and Wi-Fi 6 throughput, low la
 * Some newer units have MTD partitions shifted by `-0x20000` and can brick on sysupgrade; on others even the factory image may fail. AX3200 units produced **after 12/2023** with telnet disabled are reported to be affected. Before the first sysupgrade of a unit installed from `factory.bin`, run the checks from the wiki ("Known Issue #1"): `hexdump /dev/mtd8 | head` must start with `0000000 0dd0 edfe`, and `fw_printenv | grep -e ^flag_try -e ^boot_fw` must show `boot_fw1=run boot_rd_img;bootm`.
 * The "6 reboots → orange LED" soft-brick is prevented by this build's `bootcount` once OpenWrt has booted (see [section 3](#3-nvram-anti-brick-protection-6-reboots--orange-led-fix)).
 
-**Fallback:** going back to the stock firmware and installing this build from there works from any state, even when OpenWrt no longer boots; see [section F](#f-back-to-the-stock-firmware-then-xmir-patcher-fallback).
+**Fallback:** going back to the stock firmware and installing this build from there works from almost any state, even when OpenWrt no longer boots; see [section F](#f-back-to-the-stock-firmware-then-xmir-patcher-fallback).
 
 ### Firmware Images
 Download the images from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest) (a local build puts them into `bin/targets/mediatek/mt7622/`):
@@ -55,7 +55,7 @@ Download the images from the [latest release](https://github.com/Dreyk007/openwr
 |---|---|
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-factory.bin` | First installation from the stock firmware (or from OpenWrt ≤ 23.05). Contains `ubi-loader` padded to 512 KiB followed by the UBI image. |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` | Regular upgrade from OpenWrt 24.10 / 25.12 (UBI layout). |
-| `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi` | Raw UBI image extracted from `factory.bin` by `build.sh`, for older builds that reject the `.itb` (see below). |
+| `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi` | Raw UBI image extracted from `factory.bin` by `build.sh`. Not needed for the installation methods below. |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-ubi-loader.itb` | Second-stage U-Boot (`ubi-loader`) alone. |
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-initramfs-recovery.itb` | Initramfs recovery image (TFTP). |
 
@@ -63,7 +63,7 @@ Download the images from the [latest release](https://github.com/Dreyk007/openwr
 * **Download it on the router**, if the router has internet access: the links `https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/<file>` always point to the latest release, and `sha256sums` from the same place checks the download. The commands are in each section.
 * **Copy it from your computer:** download the file from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest) and copy it with `scp`, which is built into Linux, macOS and Windows 10/11 (on Windows you can also use WinSCP with the SCP protocol). The `-O` option is needed because OpenWrt has no SFTP server.
 
-Commands on the router are run over SSH: `ssh root@192.168.1.1` (built into Linux, macOS and Windows 10/11), or [PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/) on Windows with host `192.168.1.1` and user `root`. The password is the root password set in LuCI; right after flashing there is none. If your router is not at `192.168.1.1`, use its address instead.
+Commands on the router are run over SSH: `ssh root@192.168.1.1` (built into Linux, macOS and Windows 10/11), or [PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/) on Windows with host `192.168.1.1` and user `root`. The password is the root password set in LuCI; right after flashing there is none. If your router is not at `192.168.1.1`, use its address instead. Paste one block of commands at a time: if the last line stays at the prompt after pasting, press Enter.
 
 ### A. From the Stock Firmware with XMiR-Patcher (recommended)
 [XMiR-Patcher](https://github.com/openwrt-xiaomi/xmir-patcher) uses a vulnerability in the stock web interface to get SSH access and flashes the firmware for you. It works on Windows, Linux and macOS.
@@ -113,7 +113,7 @@ Since 24.10 this router has a different flash layout: a second-stage bootloader 
    ```sh
    scp -O openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-factory.bin root@192.168.1.1:/tmp/
    ```
-3. Log in with `ssh root@192.168.1.1` (unless you are logged in already) and run:
+3. Connect your computer to a LAN port with a cable (not over Wi-Fi), log in with `ssh root@192.168.1.1` (unless you are logged in already) and run:
    ```sh
    mount -o remount,ro /
    mount -o remount,ro /overlay
@@ -132,25 +132,20 @@ Since 24.10 this router has a different flash layout: a second-stage bootloader 
    The restored settings replace the defaults of this build (HFO, packet steering and others); to apply them on top, see [section 6](#6-how-the-defaults-are-applied-99-custom-settings).
 
 ### D. Older Builds That Reject the `.itb` Image
-Some older third-party 24.10 builds (already with the new flash layout) refuse `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` with `Cannot find ubinized rootfs in the factory FIT-image`. Flash the raw UBI image instead. **The settings are not kept.**
+<details>
+<summary>Only if a third-party 24.10 build refuses the image with <code>Cannot find ubinized rootfs in the factory FIT-image</code></summary>
+
+Some third-party 24.10 builds (already with the new flash layout, such as the builds by acdev) refuse `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` with `Cannot find ubinized rootfs in the factory FIT-image`. These builds add this check themselves; OpenWrt does not have it. **Do not flash the image past this error** (neither *Continue* in LuCI nor `sysupgrade -F`).
 
 1. Back up your settings: LuCI → *System → Backup / Flash Firmware* → *Generate archive*.
-2. Put the image into `/tmp` on the router. If the router has internet access, log in with `ssh root@192.168.1.1` and download it there (the last command must print `OK`):
+2. On the acdev builds, according to a report on 4PDA, the upgrade goes through after their `faceinstal` service is stopped. Log in with `ssh root@192.168.1.1` and run:
    ```sh
-   cd /tmp
-   F=openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi
-   wget -O $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
-   wget -qO- https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
+   /etc/init.d/faceinstal stop
    ```
-   Otherwise download the file from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest) and copy it:
-   ```sh
-   scp -O openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi root@192.168.1.1:/tmp/
-   ```
-3. Log in with `ssh root@192.168.1.1` (unless you are logged in already) and run:
-   ```sh
-   sysupgrade -n /tmp/openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-sysupgrade.ubi
-   ```
-4. After the reboot open `http://192.168.1.1` (user `root`, no password) and set the passwords, or restore the archive from step 1 (*Upload archive...*).
+   Then flash `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` as in [section B](#b-upgrade-from-openwrt-2410--2512), but **without keeping the settings** (uncheck *Keep settings*, or use `sysupgrade -n`): the settings of another build do not fit this one.
+3. If the image is still refused, go back to stock and install the build from there ([section F](#f-back-to-the-stock-firmware-then-xmir-patcher-fallback)).
+
+</details>
 
 ### E. Updating `ubi-loader` (optional)
 `sysupgrade` does not touch the `ubi-loader` partition: the router keeps the version that came with `factory.bin`. To update it to the version from this build:
@@ -173,18 +168,22 @@ Some older third-party 24.10 builds (already with the new flash layout) refuse `
    ```
 
 ### F. Back to the Stock Firmware, Then XMiR-Patcher (fallback)
-The stock bootloader has a recovery mode that installs the stock firmware from a computer over the network (TFTP). It works from any state, even when OpenWrt no longer boots, as long as the bootloader itself is intact. It is also often the simplest way from an old or a third-party build to this one: back to stock, then [section A](#a-from-the-stock-firmware-with-xmir-patcher-recommended). **All settings are reset**; if the router still works, back them up first (LuCI → *System → Backup / Flash Firmware* → *Generate archive*).
+The stock bootloader has a recovery mode that installs the stock firmware from a computer over the network (TFTP). It usually works even when OpenWrt no longer boots. It is also often the simplest way from an old or a third-party build to this one: back to stock, then [section A](#a-from-the-stock-firmware-with-xmir-patcher-recommended). **All settings are reset**; if the router still works, back them up first (LuCI → *System → Backup / Flash Firmware* → *Generate archive*).
 
 1. Download the stock firmware of your model (the router rejects the firmware of the other one):
-   * **Xiaomi AX3200 (RB01):** [`miwifi_rb01_firmware_bbc77_1.0.71_INT.bin`](http://cdn.awsde0-fusion.fds.api.mi-img.com/xiaoqiang/rom/rb01/miwifi_rb01_firmware_bbc77_1.0.71_INT.bin) from Xiaomi's server;
-   * **Redmi AX6S (RB03):** from [Xiaomi's download page](http://www1.miwifi.com/miwifi_download.html), or version 1.2.7, which the OpenWrt wiki recommends ([mirror](https://github.com/AoThen/AX6S-unlock/raw/master/miwifi_rb03_firmware_stable_1.2.7.bin)).
+   * **Xiaomi AX3200 (RB01):** [`miwifi_rb01_firmware_bbc77_1.0.71_INT.bin`](http://cdn.awsde0-fusion.fds.api.mi-img.com/xiaoqiang/rom/rb01/miwifi_rb01_firmware_bbc77_1.0.71_INT.bin) from Xiaomi's server, MD5 `271f2faa9ae6123c99ab3493fa3bbc77`;
+   * **Redmi AX6S (RB03):** from [Xiaomi's download page](http://www1.miwifi.com/miwifi_download.html), or version 1.2.7, which the OpenWrt wiki recommends ([mirror](https://github.com/AoThen/AX6S-unlock/raw/master/miwifi_rb03_firmware_stable_1.2.7.bin), MD5 `5eedf1632ac97bb5a6bb072c08603ed7`).
+
+   Check the downloaded file: `md5sum <file>` on Linux, `md5 <file>` on macOS, `certutil -hashfile <file> MD5` on Windows.
 2. Connect your computer to a LAN port of the router with a cable and start a DHCP and TFTP server on it:
-   * **Windows:** Xiaomi's official [MiWiFi Repair Tool](http://bigota.miwifi.com/xiaoqiang/tools/MIWIFIRepairTool.x86.zip) does this for you: choose the firmware file and the network adapter connected to the router.
-   * **Manually** (Linux, or [Tftpd64](https://pjo2.github.io/tftpd64/) on Windows with the same settings): give the computer the static address `192.168.31.100` with the netmask `255.255.255.0`, rename the firmware to `C0A81F02.img` and serve its folder, handing out the single address `192.168.31.2` (the router asks for a file named after its address in hex):
-     ```sh
-     sudo dnsmasq -i <interface> -p 0 -d -z --enable-tftp --tftp-root <folder> --tftp-no-fail --dhcp-range 192.168.31.2,192.168.31.2,255.255.255.0,12h
-     ```
-3. Unplug the router's power, hold the reset button and plug the power back in. When the orange LED blinks quickly (after about 10 seconds), release the button: the router downloads the firmware and installs it.
+   * **Windows:** Xiaomi's official [MiWiFi Repair Tool](http://bigota.miwifi.com/xiaoqiang/tools/MIWIFIRepairTool.x86.zip) (its interface is in Chinese) does this for you: choose the firmware file and the network adapter connected to the router. If the tool does not find the router, give that adapter the address `192.168.31.100` with the netmask `255.255.255.0` by hand.
+   * **Manually** (on Windows if the Xiaomi tool is unavailable or does not start): give the network adapter connected to the router the static address `192.168.31.100` with the netmask `255.255.255.0` and rename the firmware to `C0A81F02.img`. The router gets the address `192.168.31.2` over DHCP and asks for a file named after that address in hex. Then start the server:
+     * **Windows:** [Tftpd64](https://pjo2.github.io/tftpd64/). In the main window choose the folder with the file as *Current Directory* and the address `192.168.31.100` in *Server interfaces*. In *Settings*, enable *TFTP Server* and *DHCP Server* on the *GLOBAL* tab, set *IP pool start address* `192.168.31.2`, *Size of pool* `1` and *Mask* `255.255.255.0` on the *DHCP* tab, click *OK* and restart Tftpd64. If Windows Firewall asks, allow Tftpd64 network access.
+     * **Linux:** dnsmasq serves the folder with the file:
+       ```sh
+       sudo dnsmasq -i <interface> -p 0 -d -z --enable-tftp --tftp-root <folder> --tftp-no-fail --dhcp-range 192.168.31.2,192.168.31.2,255.255.255.0,12h
+       ```
+3. Unplug the router's power, hold the reset button (in the hole on the back) and plug the power back in. When the orange LED blinks quickly (after about 10 seconds), release the button: the router downloads the firmware and installs it.
 4. When the LED blinks blue quickly, the stock firmware is installed: unplug the power and plug it back in. A purple blink means that the firmware was rejected (a wrong file or the other model's firmware); start again from step 3.
 5. Install this build as described in [section A](#a-from-the-stock-firmware-with-xmir-patcher-recommended), starting with the initial setup of the stock firmware.
 
