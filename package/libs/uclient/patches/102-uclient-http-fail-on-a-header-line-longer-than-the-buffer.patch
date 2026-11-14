@@ -1,0 +1,50 @@
+From 41b0b971f2f1962082219a4c6cfe6e591429f897 Mon Sep 17 00:00:00 2001
+From: Valentin Berezhnoy <dreyksmail@gmail.com>
+Date: Sat, 14 Nov 2026 21:41:32 +0200
+Subject: [PATCH] uclient-http: fail on a header line longer than the buffer
+
+A response header line that fills the read buffer can never be
+completed: reading stops, and the request waits until it times out and
+is reported as "Connection timed out". Report an invalid response at
+once instead.
+
+This includes a line whose end reaches the end of a full buffer: the
+check for a continuation line needs the next byte, which cannot be read
+any more.
+
+Assisted-by: LLM
+Signed-off-by: Valentin Berezhnoy <dreyksmail@gmail.com>
+Link: https://github.com/openwrt/uclient/pull/22
+---
+ uclient-http.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/uclient-http.c b/uclient-http.c
+index c6c52be..5402f23 100644
+--- a/uclient-http.c
++++ b/uclient-http.c
+@@ -859,7 +859,7 @@ static void __uclient_notify_read(struct uclient_http *uh)
+ 			/* Check for multi-line HTTP headers */
+ 			if (sep > data) {
+ 				if (!*next)
+-					return;
++					break;
+ 
+ 				if (isspace((unsigned char)*next) && *next != '\r' && *next != '\n') {
+ 					sep[0] = ' ';
+@@ -884,6 +884,12 @@ static void __uclient_notify_read(struct uclient_http *uh)
+ 			data = ustream_get_read_buf(uh->us, &len);
+ 		} while (data && uh->state == HTTP_STATE_RECV_HEADERS);
+ 
++		/* a header line that fills the read buffer can never be completed */
++		if (uh->state == HTTP_STATE_RECV_HEADERS && len >= uh->us->r.buffer_len) {
++			uclient_http_error(uh, UCLIENT_ERROR_INVALID_RESPONSE);
++			return;
++		}
++
+ 		if (!len)
+ 			return;
+ 	}
+-- 
+2.53.0
+

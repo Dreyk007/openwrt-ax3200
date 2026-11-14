@@ -1,0 +1,81 @@
+From 77cfc923ef954794455da79904cec74998a70b04 Mon Sep 17 00:00:00 2001
+From: Valentin Berezhnoy <dreyksmail@gmail.com>
+Date: Sat, 14 Nov 2026 21:40:52 +0200
+Subject: [PATCH] uclient-http: fail on an invalid chunk length
+
+uclient_http_read() reports an invalid chunk length with
+UCLIENT_ERROR_UNKNOWN. That code is 0, and uclient_backend_set_error()
+takes 0 for no error: it cancels the connection timeout, but the error
+callback is never called, so the request waits forever, also with
+uclient-fetch -T.
+
+Add UCLIENT_ERROR_INVALID_RESPONSE for a response that cannot be
+parsed and use it here. uclient-fetch reports it as "Invalid response"
+and exits with 7, the exit code of wget for protocol errors.
+
+Assisted-by: LLM
+Signed-off-by: Valentin Berezhnoy <dreyksmail@gmail.com>
+Link: https://github.com/openwrt/uclient/pull/22
+---
+ uclient-fetch.c | 4 ++++
+ uclient-http.c  | 2 +-
+ uclient.c       | 2 ++
+ uclient.h       | 1 +
+ 4 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/uclient-fetch.c b/uclient-fetch.c
+index c214b0b..1866862 100644
+--- a/uclient-fetch.c
++++ b/uclient-fetch.c
+@@ -532,6 +532,10 @@ static void handle_uclient_error(struct uclient *cl, int code)
+ 		ignore = !verify;
+ 		error_ret = 5;
+ 		break;
++	case UCLIENT_ERROR_INVALID_RESPONSE:
++		type = "Invalid response";
++		error_ret = 7;
++		break;
+ 	default:
+ 		error_ret = 1;
+ 		break;
+diff --git a/uclient-http.c b/uclient-http.c
+index 9d421d6..c6c52be 100644
+--- a/uclient-http.c
++++ b/uclient-http.c
+@@ -1233,7 +1233,7 @@ uclient_http_read(struct uclient *cl, char *buf, unsigned int len)
+ 		errno = 0;
+ 		chunk_len = strtoll(data, &end, 16);
+ 		if (end == data || chunk_len < 0 || chunk_len > LONG_MAX || errno) {
+-			uclient_http_error(uh, UCLIENT_ERROR_UNKNOWN);
++			uclient_http_error(uh, UCLIENT_ERROR_INVALID_RESPONSE);
+ 			return 0;
+ 		}
+ 		uh->read_chunked = chunk_len;
+diff --git a/uclient.c b/uclient.c
+index 9678915..558a215 100644
+--- a/uclient.c
++++ b/uclient.c
+@@ -498,6 +498,8 @@ const char * uclient_strerror(unsigned err)
+ 		return "ssl cn mismatch";
+ 	case UCLIENT_ERROR_MISSING_SSL_CONTEXT:
+ 		return "missing ssl context";
++	case UCLIENT_ERROR_INVALID_RESPONSE:
++		return "invalid response";
+ 	default:
+ 		return "invalid error code";
+ 	}
+diff --git a/uclient.h b/uclient.h
+index a4b7a39..b1423fa 100644
+--- a/uclient.h
++++ b/uclient.h
+@@ -36,6 +36,7 @@ enum uclient_error_code {
+ 	UCLIENT_ERROR_SSL_INVALID_CERT,
+ 	UCLIENT_ERROR_SSL_CN_MISMATCH,
+ 	UCLIENT_ERROR_MISSING_SSL_CONTEXT,
++	UCLIENT_ERROR_INVALID_RESPONSE,
+ 	__UCLIENT_ERROR_MAX
+ };
+ 
+-- 
+2.53.0
+

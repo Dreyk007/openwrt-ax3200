@@ -43,6 +43,11 @@ Remove an item when it is done.
   - Drop `feeds-patches/luci/` once the LuCI branch of the build has it.
 - **[nbd168/bridger#17](https://github.com/nbd168/bridger/pull/17).** No review yet; pinged on
   2026-11-04. Drop `patches/100-…` once the fix is in bridger and OpenWrt's package.
+- **[openwrt/uclient#22](https://github.com/openwrt/uclient/pull/22) (header lines longer than 4
+  KiB).** Opened 2026-11-14. Until uclient has the fix, `uclient-fetch` (`wget`) on every OpenWrt
+  router stalls on github.com. The build carries its three commits as `patches/10[0-2]-…`. Drop
+  them once OpenWrt's uclient package has the fix; if the PR changes in review, take the new
+  version.
 - **`978` (`pskb_expand_head()` without `BUG()`).** net-next `c7d8bc3dd511`, not marked for stable, so
   6.12 will not get it. Drop it once the kernel of the build has it. A `WARNING` from
   `pskb_expand_head()` in a user's log shows where the shared skb comes from: compare with
@@ -98,7 +103,8 @@ Remove an item when it is done.
 - **Our patches and bridger on the next release** (25.12.7 or a new series).
   - Go through "When upstream merges" above and the table in
     [AGENTS.md](AGENTS.md#upstream-contributions): drop what the release already has (`970`–`976`,
-    `799-0*`, `feeds-patches/luci/`, bridger `patches/100-…`), refresh the rest at fuzz 0.
+    `799-0*`, `feeds-patches/luci/`, bridger `patches/100-…`, uclient `patches/10[0-2]-…`), refresh
+    the rest at fuzz 0.
   - If 25.12 backports nbd's mtk_wed fixes or "mtk_eth_soc: query the wireless driver for the TID
     of flows" (pending-6.18 since 2026-10-28), check that `970`–`976` still apply and repeat the
     accounting tests.
