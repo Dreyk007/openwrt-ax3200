@@ -59,7 +59,7 @@ Download the images from the [latest release](https://github.com/Dreyk007/openwr
 | `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-initramfs-recovery.itb` | Initramfs recovery image (TFTP). |
 
 **Getting an image onto the router.** Sections B–E put an image into `/tmp` on the router in one of two ways:
-* **Download it on the router**, if the router has internet access: the links `https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/<file>` always point to the latest release, and `sha256sums` from the same place checks the download. The commands are in each section.
+* **Download it on the router**, if the router has internet access: the links `https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/<file>` always point to the latest release, and `sha256sums` from the same place checks the download. The commands are in each section. They use `curl`: the `wget` of official OpenWrt currently cannot download from GitHub. This build has `curl`; on official OpenWrt it has to be installed.
 * **Copy it from your computer:** download the file from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest) and copy it with `scp`, which is built into Linux, macOS and Windows 10/11 (on Windows you can also use WinSCP with the SCP protocol). The `-O` option is needed because OpenWrt has no SFTP server.
 
 Commands on the router are run over SSH: `ssh root@192.168.1.1` (built into Linux, macOS and Windows 10/11), or [PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/) on Windows with host `192.168.1.1` and user `root`. The password is the root password set in LuCI; right after flashing there is none. If your router is not at `192.168.1.1`, use its address instead. Paste one block of commands at a time: if the last line stays at the prompt after pasting, press Enter.
@@ -86,12 +86,12 @@ The settings are kept. From r10 on the router can do this by itself: *System →
 2. In LuCI open *System → Backup / Flash Firmware*, click *Flash image...* under *Flash new firmware image*, choose the file and click *Upload*.
 3. Leave *Keep settings and retain the current configuration* checked and click *Continue*. The router writes the image and reboots, which takes a few minutes; do not power it off meanwhile.
 
-Over SSH instead: log in with `ssh root@192.168.1.1`, download the image on the router and check it (the last command must print `OK`), then flash it:
+Over SSH instead: log in with `ssh root@192.168.1.1`, download the image on the router and check it (the last command must print `OK`), then flash it. If the router has no `curl`, install it first: `apk update && apk add curl` on OpenWrt 25.12, `opkg update && opkg install curl` on 24.10.
 ```sh
 cd /tmp
 F=openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb
-wget -O $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
-wget -qO- https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
+curl -fLo $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
+curl -fsSL https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
 ```
 ```sh
 sysupgrade /tmp/openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb
@@ -101,12 +101,12 @@ sysupgrade /tmp/openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupg
 Since 24.10 this router has a different flash layout: a second-stage bootloader (`ubi-loader`) followed by one UBI partition with the system. `sysupgrade` of OpenWrt 23.05 and older cannot switch to it, so the image is written once by hand with `mtd`. **All settings are reset.** These are the steps of method 1 from the [OpenWrt wiki](https://openwrt.org/toh/xiaomi/ax3200#upgrading_from_2305_and_earlier_to_upcoming_2410_or_snapshot) (section *Upgrading from 23.05 and earlier to upcoming 24.10 or snapshot*), which also describes a method over TFTP. Another way: back to stock, then XMiR-Patcher ([section F](#f-back-to-the-stock-firmware-then-xmir-patcher-fallback)).
 
 1. Back up your settings: LuCI → *System → Backup / Flash Firmware* → *Generate archive*.
-2. Put the image into `/tmp` on the router. If the router has internet access, log in with `ssh root@192.168.1.1` and download it there (the last command must print `OK`):
+2. Put the image into `/tmp` on the router. If the router has internet access, log in with `ssh root@192.168.1.1` and download it there (the last command must print `OK`; if there is no `curl`, run `opkg update && opkg install curl` first):
    ```sh
    cd /tmp
    F=openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-factory.bin
-   wget -O $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
-   wget -qO- https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
+   curl -fLo $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
+   curl -fsSL https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
    ```
    Otherwise download the file from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest), connect your computer to a LAN port with a cable and copy the file:
    ```sh
@@ -153,8 +153,8 @@ Some third-party 24.10 builds (already with the new flash layout, such as the bu
    ```sh
    cd /tmp
    F=openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-ubi-loader.itb
-   wget -O $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
-   wget -qO- https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
+   curl -fLo $F https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/$F
+   curl -fsSL https://github.com/Dreyk007/openwrt-ax3200/releases/latest/download/sha256sums | grep -- $F | sha256sum -c -
    ```
    Otherwise download the file from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest) and copy it:
    ```sh
