@@ -48,6 +48,11 @@ Remove an item when it is done.
   router stalls on github.com. The build carries its three commits as `patches/10[0-2]-…`. Drop
   them once OpenWrt's uclient package has the fix; if the PR changes in review, take the new
   version.
+  - [openwrt/uclient#20](https://github.com/openwrt/uclient/pull/20) (Filip722, 2026-11-12) fixes
+    the same hang differently: header lines go into a separate buffer that grows without a limit
+    (a 20 MB line is accepted), with cram tests. It does not fix the hang on an invalid chunk
+    length, and its `realloc()` failure path uses the same `UCLIENT_ERROR_UNKNOWN` (0). If
+    upstream takes #20, carry it and our chunk length commit instead.
 - **`978` (`pskb_expand_head()` without `BUG()`).** net-next `c7d8bc3dd511`, not marked for stable, so
   6.12 will not get it. Drop it once the kernel of the build has it. A `WARNING` from
   `pskb_expand_head()` in a user's log shows where the shared skb comes from: compare with
@@ -83,6 +88,21 @@ Remove an item when it is done.
   [RESEARCH.md section 5](RESEARCH.md#5-cpu-frequency-governor).
 - **Chad Monroe's series** (990-08, 990-34 of the SmartRG tree). Test it on MT7622 when it is
   submitted, as offered in #26081.
+- **Routed flows of a Wi-Fi client that changes band, with hardware offloading.** Only bridged
+  flows (bridger) were tested when a client moves from 5 GHz to 2.4 GHz
+  ([RESEARCH.md section 11](RESEARCH.md#11-wi-fi--lan-throughput-and-bridger)). Upstream reports
+  that an offloaded flow keeps its old output port when its client moves to another bridge port
+  or MAC; OpenWrt main took Julius Bairaktaris's "netfilter: flowtable: tear down direct xmit
+  flows when the fdb entry moves" for this (`279704475c`, 6.18; nf-next v9 of 2026-11-08). 6.12
+  will not get it on its own.
+  - Test first, in the default operating mode: a Wi-Fi client downloads from the internet and
+    switches from the 5 GHz to the 2.4 GHz network; the download must go on.
+  - Only if it stalls: backport the patch to 6.12. In main it is 313 lines and comes with two
+    forward path backports; check which of them 6.12 needs.
+- **Flowtable VLAN ID fix** (`c203ecf90574`, OpenWrt main as `be75fbfa9b`): the tuple is keyed on
+  the whole VLAN TCI, so frames whose tag carries a priority (PCP) miss their flow and are not
+  offloaded. Matters only for a WAN on a VLAN with PCP. It has a `Fixes:` tag; check whether
+  6.12 stable has it when 25.12.7 is merged.
 - **mt7615 uploads the CSA beacon twice as well.** `mt7615_bss_info_changed()` uploads it on
   `BSS_CHANGED_BEACON`, and `mt7615_channel_switch_beacon()` uploads the same template with the
   initial count again, as mt7915 did before mt76 `2356292ae3`. Upstream has not changed mt7615.
@@ -96,12 +116,15 @@ Remove an item when it is done.
   WAN down until `ifup wan`, and after `insmod` 5 GHz runs without WED until a reboot. Normal
   operation never unloads the module; it matters for module tests. Take `a57185c5` if module
   swaps are needed more often, and test then whether the Ethernet reset remains.
+- **Update check: its own message for exit code 7.** With the uclient patches `uclient-fetch`
+  exits with 7 on a response it cannot parse. `fetch()` in `luci-app-fwupdate` treats every code
+  except 8 as no connection, so the page says "no connection to GitHub" then.
 
 ## Next releases
 
-- **25.12.7 (Linux 6.12.113).** Merge the tag, not the branch: a newer kernel on 25.12.6 stops the
-  official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12` without
-  conflicts.
+- **25.12.7 (Linux 6.12.113 or newer).** Merge the tag, not the branch: a newer kernel on 25.12.6
+  stops the official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12`
+  without conflicts.
   - Drop `977`: 6.12.113 has the CVE-2026-98432 fix.
   - `971` no longer applies: 6.12.113 sets `NF_FLOW_HW_DEAD` at the end of
     `flow_offload_work_del()` ("netfilter: flowtable: generalize pending status bit"). Keep that
@@ -111,8 +134,16 @@ Remove an item when it is done.
     flowtable GC wait for pending hardware work (`NF_FLOW_PENDING`). Repeat the accounting tests
     of [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading),
     including `975`'s own stats interval.
-  - The cherry-picked ca-certificates, musl and dnsmasq commits come with it unchanged. It also
-    brings a MT7622 Ethernet probe race fix ("mtk_eth_soc: allocate dummy netdev sooner").
+  - The cherry-picked ca-certificates, musl, dnsmasq, uhttpd, libubox and wifi-scripts commits
+    come with it unchanged. It also brings a MT7622 Ethernet probe race fix ("mtk_eth_soc:
+    allocate dummy netdev sooner").
+  - Since 2026-11-10 the branch has 6.12.116. 6.12.114–116 add two flowtable fixes ("avoid
+    num_encaps underflow on bridge VLAN untag", "nf_flow_table: drop existing skb dst before
+    skb_dst_set_noref()") in other files than `971`–`975`; check that those still apply at fuzz 0
+    and repeat the accounting tests.
+  - ucode goes from Git HEAD 2026-02-27 to 2026-07-09 plus backports (nl80211: HE MCS parsing,
+    DFS CAC time, survey attributes). Check LuCI and the ucode parts of this build
+    (`luci-app-tuning`, `luci-app-fwupdate`, the rpcd plugins) on the router.
 - **Our patches and bridger on the next release** (25.12.7 or a new series).
   - Go through "When upstream merges" above and the table in
     [AGENTS.md](AGENTS.md#upstream-contributions): drop what the release already has (`970`–`976`,
