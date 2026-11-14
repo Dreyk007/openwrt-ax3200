@@ -1,0 +1,38 @@
+From f76151f8d04ff6a7fd22ee821278c408e4610f08 Mon Sep 17 00:00:00 2001
+From: Jiale Yao <yaojiale_2026@qq.com>
+Date: Tue, 20 Oct 2026 10:23:07 +0800
+Subject: [PATCH] wifi: mt76: mt7915: validate RF register response length
+
+The RF register query reads a 32-bit value after an eight-byte response
+prefix without checking the skb length. A truncated firmware response
+can cause an out-of-bounds read.
+
+Require the prefix and register value before accessing the response.
+
+Fixes: 0a17329ae9c1 ("mt76: mt7915: add debugfs knob for RF registers read/write")
+Signed-off-by: Jiale Yao <yaojiale_2026@qq.com>
+Link: https://patch.msgid.link/192ec1cd.2297.1a1571ea203.Coremail.yaojiale02@163.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit f76151f8d04ff6a7fd22ee821278c408e4610f08)
+---
+ mt7915/mcu.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index eb0c51bf..4b8d4215 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -4253,6 +4253,10 @@ int mt7915_mcu_rf_regval(struct mt7915_dev *dev, u32 regidx, u32 *val, bool set)
+ 					&req, sizeof(req), true, &skb);
+ 	if (ret)
+ 		return ret;
++	if (skb->len < 8 + sizeof(__le32)) {
++		dev_kfree_skb(skb);
++		return -EINVAL;
++	}
+ 
+ 	*val = le32_to_cpu(*(__le32 *)(skb->data + 8));
+ 	dev_kfree_skb(skb);
+-- 
+2.53.0
+

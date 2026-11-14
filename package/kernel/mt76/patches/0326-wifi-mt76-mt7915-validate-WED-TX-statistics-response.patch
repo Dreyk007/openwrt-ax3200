@@ -1,0 +1,53 @@
+From 07f248fe9830b1db1152b66fea4f12663277caea Mon Sep 17 00:00:00 2001
+From: Jiale Yao <yaojiale02@163.com>
+Date: Mon, 19 Oct 2026 18:15:04 +0800
+Subject: [PATCH] wifi: mt76: mt7915: validate WED TX statistics response
+
+The WED statistics query optionally skips a response prefix and then
+reads a fixed statistics structure without validating either range. A
+truncated firmware response can cause out-of-bounds reads.
+
+Calculate the chip-specific prefix and require the complete response
+before pulling the prefix.
+
+Fixes: 161a7528e407 ("wifi: mt76: mt7915: rework tx packets counting when WED is active")
+Signed-off-by: Jiale Yao <yaojiale02@163.com>
+Link: https://patch.msgid.link/20261019101506.1926943-10-yaojiale02@163.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 07f248fe9830b1db1152b66fea4f12663277caea)
+---
+ mt7915/mcu.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index eb3d6c97..eb0c51bf 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -4180,7 +4180,7 @@ int mt7915_mcu_wed_wa_tx_stats(struct mt7915_dev *dev, u16 wlan_idx)
+ 	} __packed *res;
+ 	struct mt76_wcid *wcid;
+ 	struct sk_buff *skb;
+-	int ret, len;
++	int ret, len, offset;
+ 	u16 ret_wcid;
+ 
+ 	if (is_mt7915(&dev->mt76)) {
+@@ -4197,8 +4197,13 @@ int mt7915_mcu_wed_wa_tx_stats(struct mt7915_dev *dev, u16 wlan_idx)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (!is_mt7915(&dev->mt76))
+-		skb_pull(skb, 4);
++	offset = is_mt7915(&dev->mt76) ? 0 : 4;
++	if (skb->len < offset + sizeof(*res)) {
++		dev_kfree_skb(skb);
++		return -EINVAL;
++	}
++
++	skb_pull(skb, offset);
+ 
+ 	res = (struct mt7915_mcu_wa_tx_stat *)skb->data;
+ 
+-- 
+2.53.0
+

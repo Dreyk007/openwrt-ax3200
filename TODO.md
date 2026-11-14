@@ -83,6 +83,19 @@ Remove an item when it is done.
   [RESEARCH.md section 5](RESEARCH.md#5-cpu-frequency-governor).
 - **Chad Monroe's series** (990-08, 990-34 of the SmartRG tree). Test it on MT7622 when it is
   submitted, as offered in #26081.
+- **mt7615 uploads the CSA beacon twice as well.** `mt7615_bss_info_changed()` uploads it on
+  `BSS_CHANGED_BEACON`, and `mt7615_channel_switch_beacon()` uploads the same template with the
+  initial count again, as mt7915 did before mt76 `2356292ae3`. Upstream has not changed mt7615.
+  The 2.4 GHz radio has no radar channels, so a CSA there only comes from a manual or automatic
+  channel change. The same removal as in `2356292ae3` would fix it; a candidate for an upstream
+  patch, tested like the mt7915 one.
+- **`rmmod mt7915e` with WED attached** (seen 2026-11-14 when testing modules): three warnings
+  in `page_pool_disable_direct_recycling()` (mt76 destroys the RX page pools while their NAPI is
+  still enabled; fixed upstream by `a57185c5` "wifi: mt7915: disable rx napi when removing
+  device", which applies to our mt76), then a reset of the Ethernet and the switch that leaves
+  WAN down until `ifup wan`, and after `insmod` 5 GHz runs without WED until a reboot. Normal
+  operation never unloads the module; it matters for module tests. Take `a57185c5` if module
+  swaps are needed more often, and test then whether the Ethernet reset remains.
 
 ## Next releases
 

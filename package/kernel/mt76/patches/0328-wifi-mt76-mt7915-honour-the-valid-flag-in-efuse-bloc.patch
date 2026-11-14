@@ -1,0 +1,55 @@
+From 43008928840b05056af1b558b57fca5eeaf9ada1 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Wed, 28 Oct 2026 13:23:52 +0100
+Subject: [PATCH] wifi: mt76: mt7915: honour the valid flag in efuse block
+ reads
+
+mt7915_mcu_get_eeprom() ignores the valid flag of the EFUSE_ACCESS
+response, and copies undefined data for an unwritten efuse block.
+
+Return -ENODATA for an invalid block. mt7915_eeprom_load() skips the
+block and leaves its eeprom range untouched.
+mt7915_eeprom_has_background_radar() then reports no background radar
+on MT7906.
+
+Fixes: e57b7901469f ("mt76: add mac80211 driver for MT7915 PCIe-based chipsets")
+Link: https://patch.msgid.link/20261028122403.796394-14-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 43008928840b05056af1b558b57fca5eeaf9ada1)
+---
+ mt7915/eeprom.c | 2 +-
+ mt7915/mcu.c    | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/mt7915/eeprom.c b/mt7915/eeprom.c
+index fe7b29eb..40e554b4 100644
+--- a/mt7915/eeprom.c
++++ b/mt7915/eeprom.c
+@@ -148,7 +148,7 @@ static int mt7915_eeprom_load(struct mt7915_dev *dev)
+ 		block_num = DIV_ROUND_UP(eeprom_size, eeprom_blk_size);
+ 		for (i = 0; i < block_num; i++) {
+ 			ret = mt7915_mcu_get_eeprom(dev, i * eeprom_blk_size, NULL);
+-			if (ret < 0)
++			if (ret < 0 && ret != -ENODATA)
+ 				return ret;
+ 		}
+ 	}
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index 4b8d4215..75dc9e3f 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -2948,6 +2948,11 @@ int mt7915_mcu_get_eeprom(struct mt7915_dev *dev, u32 offset, u8 *read_buf)
+ 	}
+ 
+ 	res = (struct mt7915_mcu_eeprom_info *)skb->data;
++	if (!le32_to_cpu(res->valid)) {
++		dev_kfree_skb(skb);
++		return -ENODATA;
++	}
++
+ 	if (!buf) {
+ 		u32 addr = le32_to_cpu(res->addr);
+ 
+-- 
+2.53.0
+

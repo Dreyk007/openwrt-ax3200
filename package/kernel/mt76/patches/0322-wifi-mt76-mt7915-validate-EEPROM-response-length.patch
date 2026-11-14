@@ -1,0 +1,38 @@
+From bbb18d7844e907d5ccb4fe80fc1f01ac4f07f5da Mon Sep 17 00:00:00 2001
+From: Jiale Yao <yaojiale02@163.com>
+Date: Mon, 19 Oct 2026 18:15:00 +0800
+Subject: [PATCH] wifi: mt76: mt7915: validate EEPROM response length
+
+The EEPROM query copies a complete firmware response block without
+checking that the response contains the address and data fields. A
+truncated response can cause an out-of-bounds read.
+
+Require the complete EEPROM response structure before processing it.
+
+Fixes: e57b7901469f ("mt76: add mac80211 driver for MT7915 PCIe-based chipsets")
+Signed-off-by: Jiale Yao <yaojiale02@163.com>
+Link: https://patch.msgid.link/20261019101506.1926943-6-yaojiale02@163.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit bbb18d7844e907d5ccb4fe80fc1f01ac4f07f5da)
+---
+ mt7915/mcu.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index efb79609..8958b134 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -2942,6 +2942,10 @@ int mt7915_mcu_get_eeprom(struct mt7915_dev *dev, u32 offset, u8 *read_buf)
+ 					&req, sizeof(req), true, &skb);
+ 	if (ret)
+ 		return ret;
++	if (skb->len < sizeof(*res)) {
++		dev_kfree_skb(skb);
++		return -EINVAL;
++	}
+ 
+ 	res = (struct mt7915_mcu_eeprom_info *)skb->data;
+ 	if (!buf) {
+-- 
+2.53.0
+
