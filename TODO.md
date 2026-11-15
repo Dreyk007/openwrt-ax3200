@@ -19,7 +19,11 @@ Remove an item when it is done.
   unbinding" and Arnau Valls's "netfilter: flowtable: remove hw flows before unbinding the flow
   block" (nf, 2026-11-03, `Cc: stable`, tested on MT7981 with 6.12.74) fix what `972`/`973` fix:
   offloaded flows that stay in the PPE after a firewall reload. A `Cc: stable` fix reaches 6.12 on
-  its own and may then conflict with `972`.
+  its own and may then conflict with `972`. In OpenWrt this is
+  [openwrt/openwrt#17915](https://github.com/openwrt/openwrt/issues/17915): long-lived
+  connections (WireGuard, VoIP) break after a firewall reload. OpenWrt reloads the firewall by
+  itself when PPPoE reconnects or DHCP renews, so PPPoE users see it most. The cause was found
+  there on 2026-11-03 on an MT7981. Official 25.12 still has it.
   - Once one is merged, repeat the firewall reload test of
     [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading) without
     `972`/`973`.
@@ -43,16 +47,13 @@ Remove an item when it is done.
   - Drop `feeds-patches/luci/` once the LuCI branch of the build has it.
 - **[nbd168/bridger#17](https://github.com/nbd168/bridger/pull/17).** No review yet; pinged on
   2026-11-04. Drop `patches/100-…` once the fix is in bridger and OpenWrt's package.
-- **[openwrt/uclient#22](https://github.com/openwrt/uclient/pull/22) (header lines longer than 4
-  KiB).** Opened 2026-11-14. Until uclient has the fix, `uclient-fetch` (`wget`) on every OpenWrt
-  router stalls on github.com. The build carries its three commits as `patches/10[0-2]-…`. Drop
-  them once OpenWrt's uclient package has the fix; if the PR changes in review, take the new
-  version.
-  - [openwrt/uclient#20](https://github.com/openwrt/uclient/pull/20) (Filip722, 2026-11-12) fixes
-    the same hang differently: header lines go into a separate buffer that grows without a limit
-    (a 20 MB line is accepted), with cram tests. It does not fix the hang on an invalid chunk
-    length, and its `realloc()` failure path uses the same `UCLIENT_ERROR_UNKNOWN` (0). If
-    upstream takes #20, carry it and our chunk length commit instead.
+- **[openwrt/uclient#20](https://github.com/openwrt/uclient/pull/20) (header lines longer than 4 KiB).**
+  Until uclient has the fix, `uclient-fetch` (`wget`) on every OpenWrt router stalls on
+  github.com. The build carries the three commits of our [openwrt/uclient#22](https://github.com/openwrt/uclient/pull/22) as `patches/10[0-2]-…`. We closed
+  #22 on 2026-11-15 in favour of #20 (Filip722): after our review it limits a header line to
+  64 KiB and adds the same `UCLIENT_ERROR_INVALID_RESPONSE`, also for an invalid chunk length
+  (`8dc6934`; tested by us on 2026-11-15). Once upstream takes #20, replace our patches with its
+  commits; drop them when OpenWrt's uclient package has them.
 - **`978` (`pskb_expand_head()` without `BUG()`).** net-next `c7d8bc3dd511`, not marked for stable, so
   6.12 will not get it. Drop it once the kernel of the build has it. A `WARNING` from
   `pskb_expand_head()` in a user's log shows where the shared skb comes from: compare with
@@ -116,6 +117,19 @@ Remove an item when it is done.
   WAN down until `ifup wan`, and after `insmod` 5 GHz runs without WED until a reboot. Normal
   operation never unloads the module; it matters for module tests. Take `a57185c5` if module
   swaps are needed more often, and test then whether the Ethernet reset remains.
+- **xl2tpd only when an L2TP interface comes up.** It runs from boot and the L2TP modules stay
+  loaded although no interface uses them (796 kB resident on the router, 2026-11-15).
+  `/lib/netifd/proto/l2tp.sh` starts xl2tpd itself. The Archer A5 v4 build drops its start at
+  boot (feed patch `0003-xl2tpd-do-not-start-at-boot`) and the `AUTOLOAD` of `kmod-l2tp` and
+  `kmod-pppol2tp` in `netsupport.mk` (branch `task/l2tp-fixes` of openwrt-archer-a5v4-c50v4). Small
+  gain at 256 MB; take it with an L2TP test on the router.
+- **DoH with the clock behind.** dnsmasq asks only the DoH proxies (`noresolv`), and NTP resolves
+  its servers by name. If the clock at boot is earlier than the start of validity of the
+  certificate of cloudflare-dns.com or dns.google, TLS fails, no name resolves and NTP cannot
+  correct the clock. The init script of https-dns-proxy does nothing about the time. To check on
+  the router (with the owner's OK): how the clock comes back after a reboot and after a power cut
+  (RTC of the MT7622, `sysfixtime`), then set it a few months back and restart the service. If
+  it gets stuck: NTP servers by IP address, or start the proxies only after the first NTP sync.
 - **Update check: its own message for exit code 7.** With the uclient patches `uclient-fetch`
   exits with 7 on a response it cannot parse. `fetch()` in `luci-app-fwupdate` treats every code
   except 8 as no connection, so the page says "no connection to GitHub" then.
@@ -134,6 +148,13 @@ Remove an item when it is done.
     flowtable GC wait for pending hardware work (`NF_FLOW_PENDING`). Repeat the accounting tests
     of [RESEARCH.md section 3](RESEARCH.md#3-traffic-accounting-with-hardware-offloading),
     including `975`'s own stats interval.
+  - The rework (`ed250c60e164`, upstream `03428ca5cee9`) must come with its fix "netfilter:
+    flowtable: fix offloaded ct timeout never being extended" (upstream `53b3e60edb67`, also in
+    6.12.113). Without it, the timeout of an offloaded connection is never extended: WED-offloaded
+    flows drop after about 300 s (seen on MT7986). 6.12.112 still has the old logic
+    (`nf_ct_offload_timeout()`) and is not affected. Before releasing 25.12.7, check that
+    `nf_flow_table_extend_ct_timeout()` compares against one `READ_ONCE(ct->timeout)` snapshot,
+    and keep a Wi-Fi download through WED running for more than 10 minutes.
   - The cherry-picked ca-certificates, musl, dnsmasq, uhttpd, libubox and wifi-scripts commits
     come with it unchanged. It also brings a MT7622 Ethernet probe race fix ("mtk_eth_soc:
     allocate dummy netdev sooner").
