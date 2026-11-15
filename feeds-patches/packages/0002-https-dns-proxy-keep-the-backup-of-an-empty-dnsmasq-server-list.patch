@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Tue, 3 Nov 2026 14:00:00 +0200
+Subject: [PATCH] https-dns-proxy: keep the backup of an empty dnsmasq server
+ list
+
+When dnsmasq has no server of its own (the default), the service
+stores its backup as a single empty entry of doh_backup_server. The
+next start tests the backup with [ -z "$(uci_get ...)" ], which is true
+for that entry, so it backs up the server list again, now with the
+addresses of the proxy instances in it. The service is started more
+than once after a boot (by its interface and config triggers), so on a
+default system the backup ends up as '' '127.0.0.1#5053'
+'127.0.0.1#5054'. Stopping or disabling the service then puts the
+proxy addresses back into dnsmasq although nothing listens there any
+more; deleting an instance leaves its address behind in the same way.
+
+Test whether the backup exists, as the restore already does.
+
+Seen on QEMU (malta, OpenWrt 25.12): after the second start
+dhcp.@dnsmasq[0].doh_backup_server was '' '127.0.0.1#5053'
+'127.0.0.1#5054', and a restart without the second instance kept
+127.0.0.1#5054 in the server list. A new test of the package covers
+it (fails without the change; 132 tests pass with it).
+---
+ net/https-dns-proxy/Makefile                  |  2 +-
+ .../files/etc/init.d/https-dns-proxy          |  4 +++-
+ net/https-dns-proxy/tests/run_tests.sh        | 21 +++++++++++++++++++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/net/https-dns-proxy/Makefile b/net/https-dns-proxy/Makefile
+index 3695d46..1934235 100644
+--- a/net/https-dns-proxy/Makefile
++++ b/net/https-dns-proxy/Makefile
+@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=https-dns-proxy
+ PKG_VERSION:=2026.05.06
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ PKG_CPE_ID:=cpe:/a:mossdef:https-dns-proxy
+ 
+ PKG_SOURCE_PROTO:=git
+diff --git a/net/https-dns-proxy/files/etc/init.d/https-dns-proxy b/net/https-dns-proxy/files/etc/init.d/https-dns-proxy
+index 5803318..b358bbe 100755
+--- a/net/https-dns-proxy/files/etc/init.d/https-dns-proxy
++++ b/net/https-dns-proxy/files/etc/init.d/https-dns-proxy
+@@ -532,7 +532,9 @@ dhcp_backup() {
+ 			fi
+ 			uci_set 'dhcp' "$cfg" 'noresolv' 1
+ 		fi
+-		if [ -z "$(uci_get 'dhcp' "$cfg" 'doh_backup_server')" ]; then
++		# The backup of an empty server list is one empty entry: test that the backup exists, as
++		# the restore does
++		if ! uci_get 'dhcp' "$cfg" 'doh_backup_server' >/dev/null 2>&1; then
+ 			if [ -z "$(uci_get 'dhcp' "$cfg" 'server')" ]; then
+ 				uci_add_list 'dhcp' "$cfg" 'doh_backup_server' ""
+ 			fi
+diff --git a/net/https-dns-proxy/tests/run_tests.sh b/net/https-dns-proxy/tests/run_tests.sh
+index 9bf4bee..59ce829 100644
+--- a/net/https-dns-proxy/tests/run_tests.sh
++++ b/net/https-dns-proxy/tests/run_tests.sh
+@@ -493,6 +493,27 @@ dhcp_backup 'restore'
+ val="$(uci_get "dhcp" "cfg01" "noresolv")"
+ assert_eq "dhcp_backup restore: noresolv=1 preserved" "1" "$val"
+ 
++# Test: a second start (procd triggers start the service again) keeps the backup of an empty
++# server list, so that the restore does not leave the proxy servers in dnsmasq
++rm -f "$__uci_store"/*
++uci_set "dhcp" "cfg01" ".type" "dnsmasq"
++uci_set "dhcp" "cfg01" "port" "53"
++dnsmasq_config_update="*"
++force_dns=""
++canaryDomains=""
++
++dhcp_backup 'create'
++dnsmasq_doh_server "cfg01" "add" "127.0.0.1" "5053"
++dhcp_backup 'create'
++
++val="$(uci_get "dhcp" "cfg01" "doh_backup_server")"
++assert_eq "dhcp_backup create twice: backup of an empty server list kept" "" "$val"
++
++dhcp_backup 'restore'
++
++val="$(uci_get "dhcp" "cfg01" "server")"
++assert_eq "dhcp_backup restore: no proxy server left in dnsmasq" "" "$val"
++
+ printf "\n##\n## 06: dnsmasq_instance_append_force_dns_port\n##\n\n"
+ 
+ rm -f "$__uci_store"/*

@@ -59,6 +59,11 @@ Remove an item when it is done.
   `pskb_expand_head()` in a user's log shows where the shared skb comes from: compare with
   [openwrt/openwrt#26151](https://github.com/openwrt/openwrt/issues/26151), where fraglist GRO
   (`rx-gro-list`, on by default in OpenWrt) is suspected.
+- **https-dns-proxy feed patch (`feeds-patches/packages/0002-…`).** Submit it to openwrt/packages
+  (`net/https-dns-proxy`, Stan Grishin): rebase onto master and set `PKG_RELEASE` one above
+  master's. One submission covers the Archer A5 v4 build too, which carries the same patch. Drop it
+  once the feed of the build has the fix; the `doh_backup` cleanup in `99-custom-settings` stays
+  for configurations of earlier builds.
 - **bridger version.** The build has `4b63ed4` (2026-10-27), OpenWrt main has `2a2d126`. Do not go back
   when OpenWrt updates the package. Optionally submit "bridger: update to Git HEAD (2026-10-27)" to
   OpenWrt.
