@@ -80,7 +80,7 @@ Commands on the router are run over SSH: `ssh root@192.168.1.1` (built into Linu
 If the exploit does not work with your stock firmware version, see the wiki for the alternatives (stock firmware with telnet, `netmode 4` methods, UART).
 
 ### B. Upgrade from OpenWrt 24.10 / 25.12
-The settings are kept. From r10 on the router can do this by itself: *System → AX3200 / AX6S build updates* ([Firmware updates](#firmware-updates)).
+The settings are kept. From r15 on the router can do this by itself: *System → AX3200 / AX6S build updates*; for earlier releases of this build (r6–r14), use the update command in [Firmware updates](#firmware-updates).
 
 1. Download `openwrt-mediatek-mt7622-xiaomi_redmi-router-ax6s-squashfs-sysupgrade.itb` from the [latest release](https://github.com/Dreyk007/openwrt-ax3200/releases/latest).
 2. In LuCI open *System → Backup / Flash Firmware*, click *Flash image...* under *Flash new firmware image*, choose the file and click *Upload*.
@@ -288,6 +288,12 @@ The best acceleration settings depend on how the router is used. LuCI → *Syste
 From r10 on, the router looks for new releases of this build on GitHub. When a release is out, the Overview page shows a notice. LuCI → *System → AX3200 / AX6S build updates* lists what changed and installs the update with one button, with or without keeping the settings; before installing, the router checks that the file is complete and fits this router. Some releases cannot be installed this way, for example when the flash layout changes: the page then says why and links to the instructions. The check can be turned off or set to another interval on the same page.
 
 This is standard OpenWrt behaviour: an update removes the packages you installed yourself. With **Keep my packages** next to the update button (on by default), the router installs them again once it is online after the update, and repeats replacements of image packages, such as `dnsmasq-full` instead of `dnsmasq`; services you had turned off stay off. Packages installed not from a repository (from a file or by an install script) have to be installed again by hand: the page lists them. After installing them, the router restarts once, so that they start as after a normal boot. An update made another way (*Backup / Flash Firmware*, `sysupgrade`) does not restore packages.
+
+**Updating earlier releases (r6–r14) with one command.** On r10–r14 the update page fails with "no connection to GitHub", and r6–r9 have no update page. To update any earlier release of this build to the latest one with the settings and packages kept, run this over SSH or in LuCI's web terminal (*Services → Terminal*):
+```sh
+curl -fsSL https://raw.githubusercontent.com/Dreyk007/openwrt-ax3200/HEAD/ax3200-update.sh | sh
+```
+For Russian output, use `sh -s -- --lang=ru` instead of `sh`. If the update cannot keep settings, the command shows why and stops without changing anything.
 
 Attended Sysupgrade, OpenWrt's own update tool, is not part of this build. It can be installed separately, and an update through it works, but the router then moves to plain OpenWrt without the advantages of this build.
 
