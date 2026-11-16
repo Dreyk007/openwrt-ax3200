@@ -138,6 +138,24 @@ Remove an item when it is done.
 - **Update check: its own message for exit code 7.** With the uclient patches `uclient-fetch`
   exits with 7 on a response it cannot parse. `fetch()` in `luci-app-fwupdate` treats every code
   except 8 as no connection, so the page says "no connection to GitHub" then.
+- **sysupgrade leaves the PPPoE session open at the ISP.**
+  - **The cause.** `stage2` does not stop `network` on devices with more than 32 MB of RAM,
+    so nothing runs `ifdown`. `kill_remaining TERM` then reaches netifd, and netifd sends
+    SIGKILL to its `proto_task` pppd (`main.c` `netifd_kill_processes()`) before pppd sends its
+    PADT.
+  - **Measured on 2026-11-16** on a lab PPPoE server, with r15 flashed over r15 and the settings
+    kept:
+    - no Term-Request and no PADT left the router;
+    - the PADI after the boot came 52 s later, while the server still held the old session;
+    - a `reboot` sent Term-Request and PADT within 0.075 s (`ifdown -a` in `/etc/init.d/network`).
+  - **The effect.** An ISP with one session per login may reject the new login with
+    `AUTH_TOPEER_FAILED` until its own timeout closes the old session. netifd retries about
+    twice a second (`authfail` 0).
+  - **The fix to try.** In `stage2`, bring the ppp-proto interfaces down before
+    `kill_remaining`.
+    - Check it with the same lab test: a real sysupgrade with a session up.
+    - It is an upstream bug: submit it to OpenWrt as well.
+    - The bench and the logs are in the task `pppoe-auth` of the agents folder.
 
 ## Next releases
 
