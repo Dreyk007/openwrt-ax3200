@@ -106,6 +106,7 @@ git log --oneline --no-merges $BASE..xq-25.12 --author=remittor --author='David 
 | `package/base-files/files/etc/uci-defaults/77_wireless` | Band-aware radio defaults (file added by the remittor patch) |
 | `package/base-files/files/bin/config_generate` | `system.ntp.enable_server='1'` |
 | `.gitignore` | `/files` removed, so that the rootfs overlay is tracked |
+| `.github/ISSUE_TEMPLATE/bug-report.yml`, `.github/ISSUE_TEMPLATE/config.yml` | Short issue form for this build, replacing OpenWrt's form.<br>Fields: description, release (from `/etc/ax3200_release`), model, how the release was installed, steps, additional info.<br>Links: the device's wiki page instead of OpenWrt's feature request forum.<br>Label: `bug` only. |
 | `README.md` | Completely rewritten |
 
 ---
