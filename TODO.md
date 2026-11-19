@@ -156,6 +156,104 @@ Remove an item when it is done.
     - Check it with the same lab test: a real sysupgrade with a session up.
     - It is an upstream bug: submit it to OpenWrt as well.
     - The bench and the logs are in the task `pppoe-auth` of the agents folder.
+- **SQM on PPPoE: offloaded downloads may skip the shaper.**
+  - **The cause (to confirm).** The *SQM* operating mode puts SQM on `pppoe-wan`
+    (`wan_device()` in `tuning.uc`) and switches to software flow offloading. fw4 puts the
+    zone's Ethernet port into the flowtable, not `pppoe-wan`. So the fast path takes an
+    offloaded PPPoE download in at the port, PPPoE header and all, and the download never passes
+    the tc ingress of `pppoe-wan`, where sqm-scripts redirects it to `ifb4pppoe-wan`.
+  - **What stays shaped.** Uploads still leave through `pppoe-wan` and stay shaped. So do the
+    first packets of each connection, before it is offloaded.
+  - **Where this comes from.** MilkFlint (below) describes and fixes it in `36937d7b60`.
+    [RESEARCH.md section 9](RESEARCH.md#9-wan-bufferbloat-and-the-need-for-sqm) measured SQM
+    with software offloading on a DHCP WAN only.
+  - **Check** on a lab PPPoE server (the bench of the sysupgrade item above): the *SQM* mode
+    with PPPoE, and a download well above the set rate. Compare the bytes in
+    `tc -s qdisc show dev ifb4pppoe-wan` with the download, and the throughput with the rate.
+  - **Fix to try:** shape the Ethernet device (`network.wan.device`, e.g. `wan` or `wan.500`)
+    instead of `pppoe-wan`.
+    - Its tc ingress runs before the netfilter ingress hook of the flowtable, as on a DHCP WAN,
+      where section 9 saw the CAKE counters grow with offloading on.
+    - CAKE then gets PPPoE frames, so check that it still tells the flows apart and how it
+      counts the extra headers.
+    - Measure again.
+  - **MilkFlint's fix** is two patches, not upstream:
+    - a kernel patch (543 lines): the fast path of `nft_flow_offload` stops at a device with tc
+      ingress;
+    - a fw4 patch that adds `pppoe-wan` to the flowtable (`d831baba6e`).
+- **MilkFlint**, the source of the items below: OddBlueDog's OpenWrt 25.12.6 build for the
+  GL-MT6000 (MT7986), [forum thread](https://forum.openwrt.org/t/254862),
+  [repository](https://github.com/OddBlueDog/openwrt), branch `milkflint-25.12`.
+  - It has 130 commits, mostly written with AI. Its author publishes no CPU or throughput
+    measurements for its patches.
+  - Patch names below are the files in that branch's `target/linux/generic/` and
+    `package/kernel/mt76/patches/`. Hashes are commits there.
+  - **Not applicable here:**
+    - RSS and the cheaper receive path (MT7986 Ethernet, netsys v2 and newer);
+    - its WED fixes (WO and WED v2; the one for WED v1, `793-02`, is listed above);
+    - its kernel 6.12.115 (the official kmods need 25.12's kernel);
+    - its web interface, AdGuard Home, banIP, own kmod feed and KFENCE.
+- **cake_mq for downloads.**
+  - **What 25.12 has.** cake_mq is in `700-0x` and `701-0x`, and in iproute2's
+    `001-1-tc-cake-add-cake_mq-support`. sqm-scripts 1.7.2 uses it with `option use_mq 1` on a
+    device with more than one TX queue, and creates its ifb with one TX queue per CPU.
+  - **Download only.** On the router `wan` has one TX queue (`eth0` has 16), so only the
+    download (`ifb4wan`) can use cake_mq. Uploads stay with one CAKE.
+  - **Experiment** in the *SQM* mode on the ~600/365 Mbit/s link:
+    - `use_mq 1`;
+    - RPS of `wan` on both CPUs (`rps_cpus` 3);
+    - XPS of `ifb4wan` tx-0 on CPU0 and tx-1 on CPU1 (`xps_cpus` 1 and 2), so each core runs
+      its own sub-CAKE. MilkFlint 0.84a does this for PPPoE (`dc570595ba`).
+    - Set the download rate to 550–600 Mbit/s and compare throughput, per-core CPU and p99
+      with one CAKE at the same rate, by the method of section 9.
+    - Baseline: one CAKE shapes ~390–430 Mbit/s wired, at 96–98 % of one core.
+  - **Stock cake_mq's limits.** It gives each active sub-CAKE rate / n. Uneven traffic loses
+    throughput: 80/20 between two queues gives 70 % of the rate. The sum can also run over the
+    rate for moments.
+    - MilkFlint's `760-08`, `760-25` and `760-26` fix that.
+    - Take them only if stock cake_mq gains anything on two cores.
+- **CAKE patches that cut the CPU cost per packet** (MilkFlint).
+  - **The patches:**
+    - `760-01`: the host hashes only when a flow queue is allocated;
+    - `760-02`: cake_mq rates redone only when the share changes;
+    - `760-12`: the shaper's watchdog may wake up to 300 µs late and send what came due
+      meanwhile (module parameter `wake_slack_us`);
+    - "no timer for every packet of a quiet link" (`eb5e5892b8`);
+    - the rest of `7ffe78a347`, which also changes the scheduling (no dither, a bigger bulk
+      quantum).
+  - **Why they matter.** The single CAKE of section 9 is bound by one core, so any saving raises
+    the ceiling.
+  - **Test without reflashing.**
+    - Build `kmod-sched-cake` with the patches. They change only `sch_cake.c`.
+    - Install it with `apk add --allow-untrusted`.
+    - A/B it against the stock module above the CPU limit (450/340 as in section 9):
+      throughput, CPU, p99.
+  - **The fixes from netdev in the same series:**
+    - `701-03` "skip clearing unused tins during rate adjustment";
+    - `760-20`…`760-23`: autorate throttling, reconfiguration serialized with the datapath, the
+      parent backlog when a tin is cleared, and encap headers in the qdisc packet length.
+- **Flowtable fixes from 6.14** that 6.12 lacks (MilkFlint `703-01`, `703-02`):
+  - "nft_flow_offload: clear tcp MAXACK flag before moving to slowpath" (`d9d7b489416d`);
+  - "flowtable: add CLOSING state" (`fdbaf5163331`).
+  - They apply to hardware and software offloading alike. No symptom has been seen here.
+  - Check whether 25.12.7's kernel has them.
+  - Take them if TCP connections stall after leaving the fast path, or if closed connections
+    stay in the flowtable.
+- **mt76 2026-10-08 on 25.12.**
+  - **Why it is possible now.** Section 10 left the mt76 HEAD out because it needs mac80211 7.2
+    APIs. MilkFlint builds mt76 `467ae2e3f1` (the version of OpenWrt main) on 25.12 with:
+    - three compat patches (`0001`–`0003`: NAN data interface cases, the action frame layout
+      before `d49721c2`, the FILS unsolicited probe template API);
+    - two mac80211 backports from OpenWrt main: `ieee80211_txq_aql_pending()` and the
+      `sta_set_airtime_weight` op (`edc8a22ecc`, `c59ef1b709`).
+  - **Tested there** only on MT7986, which uses the mt7915 driver, since 2026-10-25. The
+    MT7622 WMAC (`mt7615`) has not been tried.
+  - **What it would give.** All of upstream instead of the cherry-picks `0300`–`0317`, with the
+    Wi-Fi tests of sections 10–12.
+  - **MilkFlint's own mt76 patches** (`0004`–`0159`, about 130 without its tests) are not
+    upstream. They touch mt7915 and the mt76 core, none `mt7615`. Take single ones only
+    against a symptom seen here. One example is reorder windows that are not a power of two
+    (`0124`, `0132`).
 
 ## Next releases
 
