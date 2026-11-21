@@ -1,0 +1,48 @@
+From ff393252f99f261ba885f05fbfdfe89807c7ffd3 Mon Sep 17 00:00:00 2001
+From: Qingfang Deng <qingfang.deng@linux.dev>
+Date: Wed, 29 Apr 2026 10:38:46 +0800
+Subject: [PATCH] pppoe: optimize hash with word access
+
+Currently, hash_item() processes the 6-byte Ethernet address and the
+2-byte session ID byte-wise to compute a hash.
+
+Optimize this by using 16-bit word operations: XOR three 16-bit words
+from the Ethernet address and the 16-bit session ID, then fold the
+result. This reduces the total number of loads and XORs. The Ethernet
+addresses in a skb and struct pppoe_addr are both 2-byte aligned, so the
+u16 pointer cast is safe.
+
+Signed-off-by: Qingfang Deng <qingfang.deng@linux.dev>
+Link: https://patch.msgid.link/20260429023848.153425-1-qingfang.deng@linux.dev
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+[ Backport to 6.12 for the AX3200 build: upstream ff393252f99f, unchanged
+  apart from the line offsets. ]
+---
+  drivers/net/ppp/pppoe.c | 12 ++++++------
+  1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/ppp/pppoe.c b/drivers/net/ppp/pppoe.c
+--- a/drivers/net/ppp/pppoe.c
++++ b/drivers/net/ppp/pppoe.c
+@@ -137,15 +137,15 @@ static inline int cmp_addr(struct pppoe_addr *a, __be16 sid, char *addr)
+ #error 8 must be a multiple of PPPOE_HASH_BITS
+ #endif
+ 
+-static int hash_item(__be16 sid, unsigned char *addr)
++static u8 hash_item(__be16 sid, const u8 addr[ETH_ALEN])
+ {
+-	unsigned char hash = 0;
++	const u16 *addr16 = (const u16 *)addr;
+ 	unsigned int i;
++	u16 hash16;
++	u8 hash;
+ 
+-	for (i = 0; i < ETH_ALEN; i++)
+-		hash ^= addr[i];
+-	for (i = 0; i < sizeof(sid_t) * 8; i += 8)
+-		hash ^= (__force __u32)sid >> i;
++	hash16 = addr16[0] ^ addr16[1] ^ addr16[2] ^ (__force u16)sid;
++	hash = (hash16 >> 8) ^ hash16;
+ 	for (i = 8; (i >>= 1) >= PPPOE_HASH_BITS;)
+ 		hash ^= hash >> i;
+ 
