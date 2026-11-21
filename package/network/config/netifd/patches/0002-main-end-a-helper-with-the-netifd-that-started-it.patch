@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Sat, 17 Oct 2026 15:08:18 +0200
+Subject: [PATCH 2/6] main: end a helper with the netifd that started it
+
+A protocol helper that netifd_start_process() starts (udhcpc, odhcp6c,
+pppd and the protocol scripts) stays alive when netifd dies. procd
+starts netifd again, which starts the helpers again, so each crash left
+a second udhcpc and odhcp6c on the interface.
+
+Set PR_SET_PDEATHSIG to SIGTERM in the child, and end the child at once
+where netifd died before that. Restore the default SIGTERM action first,
+since the child runs the handler of netifd until execve(). The setting
+holds across setsid() and across execve() of a program without
+set-user-ID bits or file capabilities, so it reaches every helper
+netifd runs in the foreground. udhcpc runs with -f, odhcp6c without -d
+and pppd with nodetach. It does not reach a process that a helper
+forks, such as the scripts a DHCP client calls, or a helper that
+daemonises itself. The hotplug scripts of interface-event.c and the
+processes of ucode.c start through their own fork() and are not
+changed.
+
+A DHCP client that ends this way releases its lease, since dhcp.sh runs
+udhcpc with -R and dhcpv6.sh runs odhcp6c without -k unless norelease
+is set.
+
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 8da363f546f579bfc039828e0bc4d061f878bcb0)
+---
+ main.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/main.c b/main.c
+index f114b4a..2c51ab1 100644
+--- a/main.c
++++ b/main.c
+@@ -19,6 +19,8 @@
+ #include <stdarg.h>
+ #include <syslog.h>
+ #include <errno.h>
++#include <unistd.h>
++#include <sys/prctl.h>
+ 
+ #include "netifd.h"
+ #include "ubus.h"
+@@ -208,6 +210,7 @@ netifd_add_process(struct netifd_process *proc, int fd, int pid)
+ int
+ netifd_start_process(const char **argv, char **env, struct netifd_process *proc)
+ {
++	pid_t parent = getpid();
+ 	int pfds[2];
+ 	int pid;
+ 
+@@ -222,6 +225,15 @@ netifd_start_process(const char **argv, char **env, struct netifd_process *proc)
+ 	if (!pid) {
+ 		int i;
+ 
++		/*
++		 * The netifd that procd starts after a crash runs the protocol
++		 * helpers again, so a helper of the dead one must end with it.
++		 */
++		signal(SIGTERM, SIG_DFL);
++		prctl(PR_SET_PDEATHSIG, SIGTERM);
++		if (getppid() != parent)
++			_exit(127);
++
+ 		if (env) {
+ 			while (*env) {
+ 				putenv(*env);

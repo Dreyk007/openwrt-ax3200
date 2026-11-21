@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Thu, 2 Jul 2026 18:16:52 +0200
+Subject: [PATCH 1/6] main: handle execvp failure on restart
+
+netifd_restart() brings all interfaces down before re-executing
+itself. When the exec failed (e.g. binary replaced mid-upgrade or a
+relative argv[0]), the callback simply returned, leaving the daemon
+alive with every interface down, no log message and no retry. Log the
+failure and exit so procd respawns the daemon.
+
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 1595cd7b25da95b80b5e500d1a7546fc4350e92c)
+---
+ main.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/main.c b/main.c
+index 6655e00..f114b4a 100644
+--- a/main.c
++++ b/main.c
+@@ -18,6 +18,7 @@
+ #include <signal.h>
+ #include <stdarg.h>
+ #include <syslog.h>
++#include <errno.h>
+ 
+ #include "netifd.h"
+ #include "ubus.h"
+@@ -271,6 +272,10 @@ netifd_kill_process(struct netifd_process *proc)
+ static void netifd_do_restart(struct uloop_timeout *timeout)
+ {
+ 	execvp(global_argv[0], global_argv);
++
++	/* all interfaces are already down; exit so procd can respawn us */
++	netifd_log_message(L_CRIT, "Failed to restart netifd: %s\n", strerror(errno));
++	exit(1);
+ }
+ 
+ int netifd_reload(void)

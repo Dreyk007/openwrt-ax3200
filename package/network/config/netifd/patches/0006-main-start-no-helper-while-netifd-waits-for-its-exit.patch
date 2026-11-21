@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Wed, 28 Oct 2026 10:19:07 +0100
+Subject: [PATCH 6/6] main: start no helper while netifd waits for its exit
+
+While netifd waits for its helpers on exit, netifd_start_process()
+still kills the previous instance of the helper with SIGKILL before it
+refuses the start. A teardown or a notify command of a protocol handler
+during the wait thus kills a helper that is ending after its SIGTERM,
+for example pppd before it sends its PADT. Also, uc_netifd_process()
+starts new processes during the wait. These get no SIGTERM, so netifd
+waits for them until procd kills it.
+
+During the wait, refuse a helper start before any helper is killed,
+and refuse process starts from ucode too.
+
+Fixes: e4b847c71b50 ("main: wait for the helpers before exiting")
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 2922ee823259e9b4208e0e68bfdf57a83ddb73f6)
+---
+ main.c   | 10 ++++++++--
+ netifd.h |  1 +
+ ucode.c  |  2 +-
+ 3 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/main.c b/main.c
+index a0479d4..49e4593 100644
+--- a/main.c
++++ b/main.c
+@@ -218,11 +218,11 @@ netifd_start_process(const char **argv, char **env, struct netifd_process *proc)
+ 	int pfds[2];
+ 	int pid;
+ 
+-	netifd_kill_process(proc);
+-
+ 	if (exiting)
+ 		return -1;
+ 
++	netifd_kill_process(proc);
++
+ 	if (pipe(pfds) < 0)
+ 		return -1;
+ 
+@@ -367,6 +367,12 @@ netifd_exit_busy(void)
+ 	return !list_empty(&process_list) || interface_event_running();
+ }
+ 
++bool
++netifd_exiting(void)
++{
++	return exiting;
++}
++
+ void
+ netifd_exit_check(void)
+ {
+diff --git a/netifd.h b/netifd.h
+index 931b8da..a301a7f 100644
+--- a/netifd.h
++++ b/netifd.h
+@@ -110,6 +110,7 @@ void netifd_log_message(int priority, const char *format, ...)
+ void netifd_add_process(struct netifd_process *proc, int fd, int pid);
+ int netifd_start_process(const char **argv, char **env, struct netifd_process *proc);
+ void netifd_kill_process(struct netifd_process *proc);
++bool netifd_exiting(void);
+ void netifd_exit_check(void);
+ 
+ struct device;
+diff --git a/ucode.c b/ucode.c
+index 553a72e..f5717e5 100644
+--- a/ucode.c
++++ b/ucode.c
+@@ -417,7 +417,7 @@ uc_netifd_process(uc_vm_t *vm, size_t nargs)
+ 	const char *prefix_str;
+ 	int pid, fd;
+ 
+-	if (ucv_type(args) != UC_OBJECT)
++	if (ucv_type(args) != UC_OBJECT || netifd_exiting())
+ 		return NULL;
+ 
+ 	arg = ucv_object_get(args, "argv", NULL);
