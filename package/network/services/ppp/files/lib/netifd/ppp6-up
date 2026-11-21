@@ -16,7 +16,32 @@ proto_send_update "$PPP_IPPARAM"
 	done
 }
 
-if [ -n "$AUTOIPV6" ]; then
+# An interface of the configuration that runs DHCPv6 on this link already,
+# e.g. wan6 with device '@wan'. odhcp6c names its ubus object after the
+# device, so a second client on it fails to register, exits and is
+# restarted at once, over and over.
+dhcpv6_on_link() {
+	local sec dev
+
+	for sec in $(uci -q show network | sed -n "s/^network\.\([^.]*\)\.proto='dhcpv6'$/\1/p"); do
+		[ "$(uci -q get "network.$sec.auto")" = "0" ] && continue
+		[ "$(uci -q get "network.$sec.disabled")" = "1" ] && continue
+		dev="$(uci -q get "network.$sec.device")"
+		[ -n "$dev" ] || dev="$(uci -q get "network.$sec.ifname")"
+		case "$dev" in
+		"@$PPP_IPPARAM"|"$IFNAME")
+			echo "$sec"
+			return 0
+			;;
+		esac
+	done
+
+	return 1
+}
+
+if [ -n "$AUTOIPV6" ] && OWN6="$(dhcpv6_on_link)"; then
+	logger -t ppp6-up "$PPP_IPPARAM: interface $OWN6 runs DHCPv6 on this link, not adding ${PPP_IPPARAM}_6"
+elif [ -n "$AUTOIPV6" ]; then
 	ZONE=$(fw3 -q network $PPP_IPPARAM 2>/dev/null)
 
 	json_init
