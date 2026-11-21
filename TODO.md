@@ -135,6 +135,43 @@ Remove an item when it is done.
   the router (with the owner's OK): how the clock comes back after a reboot and after a power cut
   (RTC of the MT7622, `sysfixtime`), then set it a few months back and restart the service. If
   it gets stuck: NTP servers by IP address, or start the proxies only after the first NTP sync.
+- **https-dns-proxy crashes in a loop while the WAN is down.**
+  - **Seen on 2026-11-21** in the log of a WAN outage (PPPoE, 2026.05.06-r1). Both proxies exited
+    about every 9 s with `[F] dns_poller.c:39 c-ares needed more IO event handler, than the number
+    of provided nameservers: 2`, and procd restarted them until the WAN came back. DoH was dead
+    for that time, and the log filled. The crash follows an outage; it does not cause one.
+  - **The cause.** The poller allocates one libev watcher per bootstrap server; `-b` gets only the
+    two IPv4 ones. It exits (`FLOG`) when c-ares opens more sockets than that, which it can do
+    while queries fail.
+  - **Upstream fix.** `63c49b405d` "Fix bootstrap socket watcher exhaustion" (2026-09-09)
+    allocates the watchers on demand. `116655073f` and `dd5f52a81b` fix the same poller later.
+    The feed, in both 25.12 and master, still pins `0ba0525fa7` (2026.05.06).
+  - **The fix.** Update the package to upstream HEAD (`e83e0b6118`, 2026-10-19), or take
+    `63c49b405d` as a patch.
+    - Submit the update to openwrt/packages together with the `0002` feed patch.
+    - Check it (with the owner's OK): cut the WAN for a few minutes and watch
+      `logread -f | grep https-dns-proxy`.
+- **zapret2 through Zapret Manager.** The README section "zapret (only if you use it)" and
+  RESEARCH §14 were tested with ZM 5.004 and zapret v1 (2026-11-04). ZM 5.089 can install zapret2
+  instead (`/opt/zapret2`, `/etc/config/zapret2`, `nfqws2` with Lua strategies). To check:
+  - **What ZM installs by default.** Does it still change the fw4 offload rule to
+    `ct original packets ge 30` for zapret2?
+  - **The settings it writes.** An install of 2026-11-21 had:
+    - `NFQWS2_PORTS_TCP=80,443,853,1024-65535` and `NFQWS2_PORTS_UDP=53,80,88,443,1024-65535`;
+    - `NFQWS2_TCP_PKT_OUT=25`;
+    - `POSTNAT=1`, which also queues the router's own traffic, DNS included;
+    - `MODE_FILTER=none`.
+  - **The strategies `games_udp` and `games_tcp`.** They cover almost every UDP port above 1024
+    and many TCP game ports, and send 8–10 fake packets for each of the first three packets of a
+    flow.
+    - Are they on by default, or opt-in?
+    - With torrents or Steam that means thousands of flows. Measure the CPU of `nfqws2`, the drops
+      in `/proc/net/netfilter/nfnetlink_queue` and the packet rate on `wan`.
+  - **The §14 test.** Repeat it: fake ClientHellos on `wan`, wired and Wi-Fi clients, all four
+    modes.
+
+  Then update README.md, README.ru.md and RESEARCH §14. Installing it on the owner's router needs
+  the owner's OK.
 - **Update check: its own message for exit code 7.** With the uclient patches `uclient-fetch`
   exits with 7 on a response it cannot parse. `fetch()` in `luci-app-fwupdate` treats every code
   except 8 as no connection, so the page says "no connection to GitHub" then.
