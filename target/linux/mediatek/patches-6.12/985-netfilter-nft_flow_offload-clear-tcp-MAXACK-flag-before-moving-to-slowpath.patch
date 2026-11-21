@@ -1,0 +1,57 @@
+From d9d7b489416d18ba696c32a93623ecb0176b374e Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Tue, 14 Jan 2025 00:50:33 +0100
+Subject: [PATCH] netfilter: nft_flow_offload: clear tcp MAXACK flag before
+ moving to slowpath
+
+This state reset is racy, no locks are held here.
+
+Since commit
+8437a6209f76 ("netfilter: nft_flow_offload: set liberal tracking mode for tcp"),
+the window checks are disabled for normal data packets, but MAXACK flag
+is checked when validating TCP resets.
+
+Clear the flag so tcp reset validation checks are ignored.
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+[ Backport to 6.12 for the AX3200 build: upstream d9d7b489416d (Linux
+  6.14), unchanged apart from the line offsets. ]
+---
+  net/netfilter/nf_flow_table_core.c | 14 ++++++++++++--
+  1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/net/netfilter/nf_flow_table_core.c b/net/netfilter/nf_flow_table_core.c
+--- a/net/netfilter/nf_flow_table_core.c
++++ b/net/netfilter/nf_flow_table_core.c
+@@ -160,10 +160,20 @@ void flow_offload_route_init(struct flow_offload *flow,
+ }
+ EXPORT_SYMBOL_GPL(flow_offload_route_init);
+ 
+-static void flow_offload_fixup_tcp(struct ip_ct_tcp *tcp)
++static void flow_offload_fixup_tcp(struct nf_conn *ct)
+ {
++	struct ip_ct_tcp *tcp = &ct->proto.tcp;
++
++	spin_lock_bh(&ct->lock);
++	/* Conntrack state is outdated due to offload bypass.
++	 * Clear IP_CT_TCP_FLAG_MAXACK_SET, otherwise conntracks
++	 * TCP reset validation will fail.
++	 */
+ 	tcp->seen[0].td_maxwin = 0;
++	tcp->seen[0].flags &= ~IP_CT_TCP_FLAG_MAXACK_SET;
+ 	tcp->seen[1].td_maxwin = 0;
++	tcp->seen[1].flags &= ~IP_CT_TCP_FLAG_MAXACK_SET;
++	spin_unlock_bh(&ct->lock);
+ }
+ 
+ static void flow_offload_fixup_ct(struct nf_conn *ct)
+@@ -175,7 +185,7 @@ static void flow_offload_fixup_ct(struct nf_conn *ct)
+ 	if (l4num == IPPROTO_TCP) {
+ 		struct nf_tcp_net *tn = nf_tcp_pernet(net);
+ 
+-		flow_offload_fixup_tcp(&ct->proto.tcp);
++		flow_offload_fixup_tcp(ct);
+ 
+ 		timeout = tn->timeouts[ct->proto.tcp.state];
+ 		timeout -= tn->offload_timeout;

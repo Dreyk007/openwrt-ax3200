@@ -1,0 +1,38 @@
+From baa3c65435fb3f450b262672bc06db887a92d397 Mon Sep 17 00:00:00 2001
+From: Pablo Neira Ayuso <pablo@netfilter.org>
+Date: Thu, 30 Apr 2026 21:55:01 +0200
+Subject: [PATCH] netfilter: flowtable: use skb_pull_rcsum() to pop vlan/pppoe
+ header
+
+This adjusts the checksum, if required, after pulling the layer 2
+header, either the pppoe header or the inner vlan header in the
+double-tagged vlan packets.
+
+Fixes: 4cd91f7c290f ("netfilter: flowtable: add vlan support")
+Fixes: 72efd585f714 ("netfilter: flowtable: add pppoe support")
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+[ Backport to 6.12 for the AX3200 build: upstream baa3c65435fb, unchanged
+  apart from the line offsets. ]
+---
+  net/netfilter/nf_flow_table_ip.c | 4 ++--
+  1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/net/netfilter/nf_flow_table_ip.c b/net/netfilter/nf_flow_table_ip.c
+--- a/net/netfilter/nf_flow_table_ip.c
++++ b/net/netfilter/nf_flow_table_ip.c
+@@ -320,13 +320,13 @@ static void nf_flow_encap_pop(struct sk_buff *skb,
+ 		switch (skb->protocol) {
+ 		case htons(ETH_P_8021Q):
+ 			vlan_hdr = (struct vlan_hdr *)skb->data;
+-			__skb_pull(skb, VLAN_HLEN);
++			skb_pull_rcsum(skb, VLAN_HLEN);
+ 			vlan_set_encap_proto(skb, vlan_hdr);
+ 			skb_reset_network_header(skb);
+ 			break;
+ 		case htons(ETH_P_PPP_SES):
+ 			skb->protocol = __nf_flow_pppoe_proto(skb);
+-			skb_pull(skb, PPPOE_SES_HLEN);
++			skb_pull_rcsum(skb, PPPOE_SES_HLEN);
+ 			skb_reset_network_header(skb);
+ 			break;
+ 		}
