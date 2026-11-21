@@ -40,10 +40,11 @@ function first_section(c, config, type) {
 	return name;
 }
 
-// SQM shapes the WAN device; PPPoE puts its own interface on top of it
+// SQM shapes the configured WAN device, also with PPPoE. That is the device fw4 puts in the
+// flowtable, and the software fast path takes a flow at its netfilter ingress hook, so the
+// downloads of an offloaded PPPoE connection never reach the ingress of pppoe-wan and its
+// shaper. tc ingress of the device itself runs before that hook.
 function wan_device(c) {
-	if (c.get('network', 'wan', 'proto') == 'pppoe')
-		return 'pppoe-wan';
 	return c.get('network', 'wan', 'device') || 'wan';
 }
 
