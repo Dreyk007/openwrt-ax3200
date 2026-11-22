@@ -26,6 +26,9 @@ const TAG_RE = /^v([0-9]+)\.([0-9]+)\.([0-9]+)-ax3200-r([0-9]+)$/;
 const METHODS = [ 'auto', 'reset', 'manual' ];
 // free space needed in /tmp besides the image: sysupgrade also keeps the settings backup there
 const SPARE_KB = 16384;
+// The rpcd plugin (fwupdate.uc) takes a download for a stopped one once its dl.started is STALE
+// (900 s) old. Leave 60 s for sha256sum, validate_firmware_image and sysupgrade -T.
+const DOWNLOAD_TIME = 840;
 
 function q(s) {
 	return "'" + replace(s, "'", "'\\''") + "'";
@@ -63,12 +66,54 @@ function write_json(file, data) {
 	rename(file + '.tmp', file);
 }
 
-// null on success, otherwise 'network' or 'http <code>' (without -q uclient-fetch names the code)
-function fetch(url, file, timeout) {
-	const r = run(sprintf('uclient-fetch -T %d -O %s %s', timeout, q(file), q(url)));
+// The message of the last failed fetch, for the log
+let fetch_detail = '';
+
+function extract_detail(out, rc) {
+	const lines = [];
+	for (let raw in split(out, '\n')) {
+		const l = trim(replace(raw, /^.*\r/, ''));
+		if (!length(l))
+			continue;
+		if (index(l, "Downloading '") == 0 || index(l, 'Connecting to ') == 0 ||
+		    index(l, 'Redirected to ') == 0 || index(l, "Writing to '") == 0 ||
+		    match(l, /[0-9]+% \|/))
+			continue;
+		push(lines, l);
+	}
+	return length(lines) ? join('; ', lines) : 'uclient-fetch exit ' + rc;
+}
+
+// null on success, otherwise 'network', 'stalled' (deadline reached) or 'http <code>'.
+// Note: uclient-fetch follows HTTP Location headers without restricting scheme downgrades
+// (https -> http); kept as is (TODO.md).
+function fetch(url, file, timeout, deadline) {
+	const tmo = file + '.timeout';
+	unlink(tmo);
+	// BusyBox here has no timeout applet and uclient-fetch -T is only a connect/inactivity
+	// timeout, so enforce the total wall-clock deadline with a watchdog subshell.
+	const cmd = sprintf(
+		"uclient-fetch -T %d -O %s %s </dev/null 2>&1 & " +
+		"pid=$!; " +
+		"( trap 'kill $spid 2>/dev/null; exit 0' TERM; " +
+		"sleep %d </dev/null >/dev/null 2>&1 & spid=$!; wait $spid; " +
+		": > %s; kill -TERM $pid 2>/dev/null; " +
+		"sleep 2 </dev/null >/dev/null 2>&1 & spid=$!; wait $spid; " +
+		"kill -KILL $pid 2>/dev/null ) </dev/null >/dev/null 2>&1 & " +
+		"kpid=$!; wait $pid; rc=$?; kill $kpid 2>/dev/null; wait $kpid 2>/dev/null; exit $rc",
+		timeout, q(file), q(url), deadline, q(tmo));
+	const r = run(cmd);
+	const timed_out = (stat(tmo) != null);
+	unlink(tmo);
+	if (timed_out) {
+		unlink(file);
+		fetch_detail = sprintf('timed out after %d s', deadline);
+		return 'stalled';
+	}
 	if (r[0] == 0)
 		return null;
 	unlink(file);
+	fetch_detail = extract_detail(r[1], r[0]);
 	if (r[0] == 8) {
 		const m = match(r[1], /HTTP error ([0-9]+)/);
 		return m ? 'http ' + m[1] : 'http';
@@ -128,7 +173,7 @@ function check() {
 	const old = read_json(STATUS) || {};
 
 	mkdir(DIR);
-	const err = fetch(custom || repo + '/releases/latest/download/release.json', DIR + '/release.new', 30);
+	const err = fetch(custom || repo + '/releases/latest/download/release.json', DIR + '/release.new', 30, 60);
 	const rel = err ? null : read_json(DIR + '/release.new');
 	unlink(DIR + '/release.new');
 
@@ -137,10 +182,11 @@ function check() {
 		for (let k in [ 'latest', 'local', 'update', 'method', 'releases', 'success' ])
 			if (k in old)
 				st[k] = old[k];
-		st.error = err || 'invalid';
+		const st_err = (err == 'stalled') ? 'network' : err;
+		st.error = st_err || 'invalid';
 		write_json(STATUS, st);
-		log('check failed: ' + st.error);
-		return (err == 'network') ? 2 : 1;
+		log('check failed: ' + st.error + (err ? ' (' + fetch_detail + ')' : ''));
+		return (st_err == 'network') ? 2 : 1;
 	}
 
 	const ikey = tag_key(st.installed.release);
@@ -200,7 +246,7 @@ function download() {
 			dl.detail = detail;
 		unlink(PART);
 		write_json(DOWNLOAD, dl);
-		log('download failed: ' + error);
+		log('download failed: ' + error + (detail ? ' (' + detail + ')' : ''));
 		return (error == 'network') ? 2 : 1;
 	};
 
@@ -222,9 +268,13 @@ function download() {
 	write_json(DOWNLOAD, dl);
 	dl.state = 'error';
 
-	const err = fetch(img.url, PART, 60);
+	const left = DOWNLOAD_TIME - (time() - dl.started);
+	if (left <= 0)
+		return fail('stalled', 'deadline exceeded');
+	const err = fetch(img.url, PART, 60, left);
 	if (err)
-		return fail(err == 'network' ? 'network' : 'http', err);
+		return fail((err == 'network' || err == 'stalled') ? err : 'http',
+			(err == 'stalled') ? fetch_detail : err + ': ' + fetch_detail);
 
 	const s = stat(PART);
 	if (!s || s.size != img.size)
