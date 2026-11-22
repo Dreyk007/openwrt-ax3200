@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Sun, 22 Nov 2026 02:30:00 +0200
+Subject: [PATCH] https-dns-proxy: update to 2026.10.19
+
+While the upstream connection is down, both proxies exit about every
+4-9 s with
+
+  [F] dns_poller.c:39 c-ares needed more IO event handler, than the
+  number of provided nameservers: 2
+
+and procd restarts them until the connection is back. The poller
+allocated one libev watcher per bootstrap server and gave up when
+c-ares opened more sockets than that, which it does while its queries
+fail. 63c49b4 ("Fix bootstrap socket watcher exhaustion") allocates the
+watchers on demand.
+
+The update also brings, among others:
+- b4dd4d4 https_client: allocate socket watchers on demand
+- 1fa4e76 https_client: bound in-flight requests
+- 4923f8f https_client: recover from receive errors
+- dd5f52a Fix resolver list getting stuck after a partial bootstrap result
+- 83f6b72 dns_tcp: prevent frame length overflow
+- c437451 Bind HTTPS and bootstrap DNS sockets to an outbound interface
+  (new option -I, not used by the service)
+
+The options the service passes are unchanged; with -u and -g both set
+the group handling of 2746cdd and 055e3a7 does not apply.
+
+Seen on an OpenWrt 25.12 router (aarch64) with a PPPoE uplink that
+forwarded no IP traffic for 7 minutes: 50 exits of the old version in
+3.5 minutes. The new version builds without new dependencies and serves
+DNS over HTTPS on both default instances.
+---
+ net/https-dns-proxy/Makefile | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/net/https-dns-proxy/Makefile b/net/https-dns-proxy/Makefile
+--- a/net/https-dns-proxy/Makefile
++++ b/net/https-dns-proxy/Makefile
+@@ -2,14 +2,14 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=https-dns-proxy
+-PKG_VERSION:=2026.05.06
+-PKG_RELEASE:=2
++PKG_VERSION:=2026.10.19
++PKG_RELEASE:=1
+ PKG_CPE_ID:=cpe:/a:mossdef:https-dns-proxy
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL:=https://github.com/aarond10/https_dns_proxy/
+-PKG_MIRROR_HASH:=345f14e0a05e032754cea440f5e8798c6896cf5bc7cc12b3c7ed1c8d34e4daad
+-PKG_SOURCE_VERSION:=0ba0525fa7c10115cc7c92e99621bfe484ae96e7
++PKG_MIRROR_HASH:=c48dadd0e122e4fb8e2ee20b8b005f92063912d9a182bab52dd66757541e5aa9
++PKG_SOURCE_VERSION:=e83e0b6118f06ac5a42ae162a9acba71d6b5c5cb
+ 
+ PKG_MAINTAINER:=Stan Grishin <stangri@melmac.ca>
+ PKG_LICENSE:=MIT
+-- 
+2.47.3
+
