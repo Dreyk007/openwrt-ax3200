@@ -1,0 +1,167 @@
+From: Dreyk <dreyksmail@gmail.com>
+Subject: [PATCH] hostapd: add acs_scan_duration option for ACS scan dwell
+
+Add acs_scan_duration (0..1000 ms, default 0) to hostapd configuration.
+When set to 0, behaviour is unchanged. Otherwise acs_request_scan()
+converts the value to TUs with rounding (e.g. 300 ms -> 293 TU) and sets
+params.duration with duration_mandatory=0 and a new duration_advisory
+bit in struct wpa_driver_scan_params.
+
+nl80211_scan_common() checks WPA_DRIVER_FLAGS_SUPPORT_SET_SCAN_DWELL
+before sending NL80211_ATTR_MEASUREMENT_DURATION, and mac80211 software
+scan drivers (such as mt7603e, mt76x2e, and mac80211_hwsim) do not
+advertise NL80211_EXT_FEATURE_SET_SCAN_DWELL even though mac80211
+honours scan_req->duration. Allow nl80211_scan_common() to send
+NL80211_ATTR_MEASUREMENT_DURATION when duration_advisory is set and
+duration_mandatory is off, leaving all other callers unchanged.
+
+Note on units: NL80211_ATTR_MEASUREMENT_DURATION is defined in TUs
+(1.024 ms), which hardware-scan drivers honouring the attribute read as
+TUs, whereas mac80211 software scan passes scan_req->duration directly to
+msecs_to_jiffies() as a minimum dwell (at HZ=100, below 110 ms stays
+110 ms, and 300 ms -> 293 TU -> 30 jiffies = 300 ms).
+---
+ hostapd/config_file.c             |  8 ++++++++
+ hostapd/hostapd.conf              |  9 +++++++++
+ src/ap/acs.c                      | 12 ++++++++++++
+ src/ap/ap_config.c                |  1 +
+ src/ap/ap_config.h                |  1 +
+ src/drivers/driver.h              |  8 ++++++++
+ src/drivers/driver_nl80211_scan.c |  5 +++--
+ wpa_supplicant/scan.c             |  1 +
+ 8 files changed, 44 insertions(+), 2 deletions(-)
+
+Index: hostapd-2025.08.26~ca266cc2/hostapd/config_file.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/hostapd/config_file.c
++++ hostapd-2025.08.26~ca266cc2/hostapd/config_file.c
+@@ -3264,6 +3264,14 @@ static int hostapd_config_fill(struct ho
+ 			return 1;
+ 		}
+ 		conf->acs_num_scans = val;
++	} else if (os_strcmp(buf, "acs_scan_duration") == 0) {
++		int val = atoi(pos);
++		if (val < 0 || val > 1000) {
++			wpa_printf(MSG_ERROR, "Line %d: invalid acs_scan_duration %d (expected 0..1000)",
++				   line, val);
++			return 1;
++		}
++		conf->acs_scan_duration = val;
+ 	} else if (os_strcmp(buf, "acs_chan_bias") == 0) {
+ 		if (hostapd_config_parse_acs_chan_bias(conf, pos)) {
+ 			wpa_printf(MSG_ERROR, "Line %d: invalid acs_chan_bias",
+Index: hostapd-2025.08.26~ca266cc2/hostapd/hostapd.conf
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/hostapd/hostapd.conf
++++ hostapd-2025.08.26~ca266cc2/hostapd/hostapd.conf
+@@ -183,6 +183,14 @@ channel=1
+ # interference that may help choosing a better channel. This can also help fine
+ # tune the ACS scan time in case a driver has different scan dwell times.
+ #
++# acs_scan_duration requirement is 0..1000 - dwell time per channel in ms for
++# each ACS scan (0 leaves the driver default unchanged). mac80211 software scan
++# drivers treat the duration as a minimum dwell time: values below 110 ms (at
++# HZ=100) keep the 110 ms default passive dwell.
++#
++# Default:
++#acs_scan_duration=0
++#
+ # acs_chan_bias is a space-separated list of <channel>:<bias> pairs. It can be
+ # used to increase (or decrease) the likelihood of a specific channel to be
+ # selected by the ACS algorithm. The total interference factor for each channel
+Index: hostapd-2025.08.26~ca266cc2/src/ap/acs.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/ap/acs.c
++++ hostapd-2025.08.26~ca266cc2/src/ap/acs.c
+@@ -1520,6 +1520,19 @@ static int acs_request_scan(struct hosta
+ 			   iface->acs_num_completed_scans + 1,
+ 			   iface->conf->acs_num_scans);
+ 
++	if (iface->conf->acs_scan_duration) {
++		/*
++		 * NL80211_ATTR_MEASUREMENT_DURATION is in TUs (1024 us), while
++		 * mac80211 software scan passes duration to msecs_to_jiffies().
++		 * Rounding ms to TUs obeys nl80211 and gives exact 200/300/400 ms
++		 * at HZ=100 (e.g. 300 ms -> 293 TU -> 30 jiffies).
++		 */
++		params.duration = (iface->conf->acs_scan_duration * 1000 + 512) / 1024;
++		if (!params.duration)
++			params.duration = 1;
++		params.duration_advisory = 1;
++	}
++
+ 	ret = hostapd_driver_scan(iface->bss[0], &params);
+ 	os_free(params.freqs);
+ 
+Index: hostapd-2025.08.26~ca266cc2/src/ap/ap_config.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/ap/ap_config.c
++++ hostapd-2025.08.26~ca266cc2/src/ap/ap_config.c
+@@ -275,6 +275,7 @@ struct hostapd_config * hostapd_config_d
+ 	conf->acs_ch_list.num = 0;
+ #ifdef CONFIG_ACS
+ 	conf->acs_num_scans = 5;
++	conf->acs_scan_duration = 0;
+ #endif /* CONFIG_ACS */
+ 
+ #ifdef CONFIG_IEEE80211AX
+Index: hostapd-2025.08.26~ca266cc2/src/ap/ap_config.h
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/ap/ap_config.h
++++ hostapd-2025.08.26~ca266cc2/src/ap/ap_config.h
+@@ -1146,6 +1146,7 @@ struct hostapd_config {
+ 
+ #ifdef CONFIG_ACS
+ 	unsigned int acs_num_scans;
++	unsigned int acs_scan_duration;
+ 	struct acs_bias {
+ 		int channel;
+ 		double bias;
+Index: hostapd-2025.08.26~ca266cc2/src/drivers/driver.h
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/drivers/driver.h
++++ hostapd-2025.08.26~ca266cc2/src/drivers/driver.h
+@@ -668,6 +668,15 @@ struct wpa_driver_scan_params {
+ 	  */
+ 	 unsigned int duration_mandatory:1;
+ 
++	 /**
++	  * duration_advisory - Send duration even without SET_SCAN_DWELL
++	  *
++	  * Used by ACS when duration is non-mandatory, so software-scan
++	  * mac80211 drivers that honour NL80211_ATTR_MEASUREMENT_DURATION
++	  * without advertising NL80211_EXT_FEATURE_SET_SCAN_DWELL receive it.
++	  */
++	 unsigned int duration_advisory:1;
++
+ 	/**
+ 	 * relative_rssi_set - Whether relative RSSI parameters are set
+ 	 */
+Index: hostapd-2025.08.26~ca266cc2/src/drivers/driver_nl80211_scan.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/drivers/driver_nl80211_scan.c
++++ hostapd-2025.08.26~ca266cc2/src/drivers/driver_nl80211_scan.c
+@@ -306,8 +306,9 @@ nl80211_scan_common(struct i802_bss *bss
+ 	}
+ 
+ 	if (params->duration) {
+-		if (!(drv->capa.rrm_flags &
+-		      WPA_DRIVER_FLAGS_SUPPORT_SET_SCAN_DWELL) ||
++		if ((!(drv->capa.rrm_flags &
++		       WPA_DRIVER_FLAGS_SUPPORT_SET_SCAN_DWELL) &&
++		     (!params->duration_advisory || params->duration_mandatory)) ||
+ 		    nla_put_u16(msg, NL80211_ATTR_MEASUREMENT_DURATION,
+ 				params->duration))
+ 			goto fail;
+Index: hostapd-2025.08.26~ca266cc2/wpa_supplicant/scan.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/wpa_supplicant/scan.c
++++ hostapd-2025.08.26~ca266cc2/wpa_supplicant/scan.c
+@@ -3604,6 +3604,7 @@ wpa_scan_clone_params(const struct wpa_d
+ 	params->low_priority = src->low_priority;
+ 	params->duration = src->duration;
+ 	params->duration_mandatory = src->duration_mandatory;
++	params->duration_advisory = src->duration_advisory;
+ 	params->oce_scan = src->oce_scan;
+ 	params->link_id = src->link_id;
+ 

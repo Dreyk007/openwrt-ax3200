@@ -1,0 +1,110 @@
+From: Dreyk <dreyksmail@gmail.com>
+Subject: [PATCH] hostapd: log missing ACS survey fields once per run
+
+OpenWrt's 470-survey_data_fallback.patch falls back to -95 dBm when a
+driver reports no noise floor, and logs a MSG_INFO line per survey.
+Because acs_survey_is_sufficient() runs per survey in more than one
+place, this emits 152 log lines per ACS run on 2.4 GHz (13 channels)
+and 183 on 5 GHz (25 channels) at the default acs_num_scans=5.
+
+Downgrade the per-survey fallback messages in acs_survey_is_sufficient()
+to MSG_DEBUG and emit a single MSG_INFO summary per missing field
+(noise floor, channel time, busy/RX time) per ACS run (up to three
+lines) in acs_study_survey_based().
+---
+ src/ap/acs.c | 53 ++++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 49 insertions(+), 4 deletions(-)
+
+Index: hostapd-2025.08.26~ca266cc2/src/ap/acs.c
+===================================================================
+--- hostapd-2025.08.26~ca266cc2.orig/src/ap/acs.c
++++ hostapd-2025.08.26~ca266cc2/src/ap/acs.c
+@@ -472,21 +472,21 @@ static int acs_survey_is_sufficient(stru
+ {
+ 	if (!(survey->filled & SURVEY_HAS_NF)) {
+ 		survey->nf = -95;
+-		wpa_printf(MSG_INFO,
++		wpa_printf(MSG_DEBUG,
+ 			   "ACS: Survey for freq %d is missing noise floor",
+ 			   survey->freq);
+ 	}
+ 
+ 	if (!(survey->filled & SURVEY_HAS_CHAN_TIME)) {
+ 		survey->channel_time = 0;
+-		wpa_printf(MSG_INFO,
++		wpa_printf(MSG_DEBUG,
+ 			   "ACS: Survey for freq %d is missing channel time",
+ 			   survey->freq);
+ 	}
+ 
+ 	if (!(survey->filled & SURVEY_HAS_CHAN_TIME_BUSY) &&
+ 	    !(survey->filled & SURVEY_HAS_CHAN_TIME_RX)) {
+-		wpa_printf(MSG_INFO,
++		wpa_printf(MSG_DEBUG,
+ 			   "ACS: Survey for freq %d is missing RX and busy time (at least one is required)",
+ 			   survey->freq);
+ 	}
+@@ -1227,6 +1227,54 @@ static void acs_adjust_center_freq(struc
+ }
+ 
+ 
++static void acs_log_incomplete_surveys(struct hostapd_iface *iface)
++{
++	unsigned int total = 0, missing_nf = 0, missing_time = 0, missing_busy = 0;
++	int i;
++
++	for (i = 0; i < iface->num_hw_features; i++) {
++		struct hostapd_hw_modes *mode = &iface->hw_features[i];
++		int j;
++
++		if (hostapd_hw_skip_mode(iface, mode))
++			continue;
++
++		for (j = 0; j < mode->num_channels; j++) {
++			struct hostapd_channel_data *chan = &mode->channels[j];
++			struct freq_survey *survey;
++
++			if (chan->flag & HOSTAPD_CHAN_DISABLED)
++				continue;
++
++			dl_list_for_each(survey, &chan->survey_list,
++					 struct freq_survey, list) {
++				total++;
++				if (!(survey->filled & SURVEY_HAS_NF))
++					missing_nf++;
++				if (!(survey->filled & SURVEY_HAS_CHAN_TIME))
++					missing_time++;
++				if (!(survey->filled & SURVEY_HAS_CHAN_TIME_BUSY) &&
++				    !(survey->filled & SURVEY_HAS_CHAN_TIME_RX))
++					missing_busy++;
++			}
++		}
++	}
++
++	if (missing_nf)
++		wpa_printf(MSG_INFO,
++			   "ACS: no noise floor in %u of %u surveys, assumed -95 dBm",
++			   missing_nf, total);
++	if (missing_time)
++		wpa_printf(MSG_INFO,
++			   "ACS: no channel time in %u of %u surveys",
++			   missing_time, total);
++	if (missing_busy)
++		wpa_printf(MSG_INFO,
++			   "ACS: no busy or RX time in %u of %u surveys",
++			   missing_busy, total);
++}
++
++
+ static int acs_study_survey_based(struct hostapd_iface *iface)
+ {
+ 	wpa_printf(MSG_DEBUG, "ACS: Trying survey-based ACS");
+@@ -1241,6 +1289,8 @@ static int acs_study_survey_based(struct
+ 		return -1;
+ 	}
+ 
++	acs_log_incomplete_surveys(iface);
++
+ 	acs_survey_all_chans_interference_factor(iface);
+ 	return 0;
+ }
