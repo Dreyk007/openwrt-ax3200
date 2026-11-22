@@ -113,6 +113,42 @@ if [ "$(uci -q get ax3200.defaults.doh_backup)" != "1" ]; then
 	uci -q commit ax3200
 fi
 
+# Presets for automatic channel selection (effective only when the user picks channel "auto"):
+# keep fixed channels and any user-configured ACS options untouched. On a fresh install,
+# 77_wireless runs /sbin/wifi config before 99-custom-settings (after kmodloader), so radio0 and
+# radio1 already exist; guard on '=wifi-device$' so an empty wireless file never sets the marker.
+if [ -f /etc/config/wireless ] && uci -q show wireless | grep -q '=wifi-device$' && \
+   [ "$(uci -q get ax3200.defaults.acs)" != "1" ]; then
+	for sec in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
+		band="$(uci -q get wireless."$sec".band)"
+		if [ "$band" = "2g" ]; then
+			[ -z "$(uci -q get wireless."$sec".channels)" ] && \
+				uci add_list wireless."$sec".channels='1-11'
+			[ -z "$(uci -q get wireless."$sec".acs_chan_bias)" ] && \
+				uci set wireless."$sec".acs_chan_bias='1:0.6 6:0.6 11:0.6'
+			if ! uci -q show wireless."$sec".hostapd_options | grep -qE "(^|[' ])acs_num_scans="; then
+				uci add_list wireless."$sec".hostapd_options='acs_num_scans=2'
+			fi
+		elif [ "$band" = "5g" ]; then
+			[ -z "$(uci -q get wireless."$sec".acs_exclude_dfs)" ] && \
+				uci set wireless."$sec".acs_exclude_dfs='1'
+			if ! uci -q show wireless."$sec".hostapd_options | grep -qE "(^|[' ])acs_num_scans="; then
+				uci add_list wireless."$sec".hostapd_options='acs_num_scans=1'
+			fi
+			# min_tx_power=15 skips EU 25 mW (13 dBm) channels 149-173; MT7915 cap is 27 dBm, PA/RU/UA/BY/KZ/US >= 20 dBm.
+			if [ -z "$(uci -q get wireless."$sec".min_tx_power)" ] && \
+			   ! uci -q show wireless."$sec".hostapd_options | grep -qE "(^|[' ])min_tx_power="; then
+				uci add_list wireless."$sec".hostapd_options='min_tx_power=15'
+			fi
+		fi
+	done
+	uci -q commit wireless
+	touch /etc/config/ax3200
+	uci set ax3200.defaults='defaults'
+	uci set ax3200.defaults.acs='1'
+	uci -q commit ax3200
+fi
+
 [ "$(uci -q get ax3200.defaults.applied)" = "1" ] && exit 0
 
 # Footstrap as the default LuCI theme instead of the stock Bootstrap
