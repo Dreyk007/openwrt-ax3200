@@ -1,0 +1,39 @@
+From f79250da4135d401d7a58d1d1b17391f130dbc3a Mon Sep 17 00:00:00 2001
+From: Tristan Madani <tristan@talencesecurity.com>
+Date: Mon, 2 Nov 2026 19:17:50 +0000
+Subject: [PATCH 344/344] wifi: mt76: mt7615: cancel coredump delayed work on
+ device unregister
+
+mt7615_unregister_device() calls mt76_free_device() which destroys the
+workqueue without first cancelling the coredump.work delayed work. If a
+firmware coredump is in progress when the driver is unloaded, the pending
+timer can fire after the workqueue has been freed.
+
+Add cancel_delayed_work_sync() for coredump.work in
+mt7615_unregister_device() before the mt76_free_device() call.
+
+Fixes: d2bf7959d9c0 ("mt76: mt7663: introduce coredump support")
+Cc: stable@vger.kernel.org
+Signed-off-by: Tristan Madani <tristan@talencesecurity.com>
+Link: https://patch.msgid.link/20261102191750.2308294-1-tristan@talencesecurity.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit f79250da4135d401d7a58d1d1b17391f130dbc3a)
+---
+ mt7615/pci_init.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mt7615/pci_init.c b/mt7615/pci_init.c
+index a9178e07..1ea45285 100644
+--- a/mt7615/pci_init.c
++++ b/mt7615/pci_init.c
+@@ -124,5 +124,7 @@ void mt7615_unregister_device(struct mt7615_dev *dev)
+ 	mt7615_dma_cleanup(dev);
+ 	tasklet_disable(&dev->mt76.irq_tasklet);
+ 
++	cancel_delayed_work_sync(&dev->coredump.work);
++	skb_queue_purge(&dev->coredump.msg_list);
+ 	mt76_free_device(&dev->mt76);
+ }
+-- 
+2.53.0
+

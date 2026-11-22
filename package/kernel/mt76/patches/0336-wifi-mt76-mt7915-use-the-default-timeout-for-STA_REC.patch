@@ -1,0 +1,38 @@
+From bd95a95177f8603b33ed21b82bcbc8895bbb1247 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Tue, 17 Nov 2026 19:01:19 +0100
+Subject: [PATCH 336/345] wifi: mt76: mt7915: use the default timeout for
+ STA_REC and BSS_INFO
+
+mt7915_mcu_set_timeout() gives STA_REC_UPDATE and BSS_INFO_UPDATE a
+timeout of 2 seconds. Their payload grows with the beacon templates of
+MBSS configurations, the firmware can take longer to process them, and
+an MCU timeout resets the device.
+
+Use the default timeout for both commands, like mt7996.
+
+Fixes: 1254c66356d1 ("wifi: mt76: mt7915: decrease timeout for commonly issued MCU commands")
+Reviewed-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Link: https://patch.msgid.link/20261117180134.2940930-4-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit bd95a95177f8603b33ed21b82bcbc8895bbb1247)
+---
+ mt7915/mcu.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index 75dc9e3f..d3079a00 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -214,8 +214,6 @@ mt7915_mcu_set_timeout(struct mt76_dev *mdev, int cmd)
+ 	case MCU_EXT_CMD_THERMAL_CTRL:
+ 	case MCU_EXT_CMD_GET_MIB_INFO:
+ 	case MCU_EXT_CMD_PHY_STAT_INFO:
+-	case MCU_EXT_CMD_STA_REC_UPDATE:
+-	case MCU_EXT_CMD_BSS_INFO_UPDATE:
+ 		mdev->mcu.timeout = 2 * HZ;
+ 		return;
+ 	case MCU_EXT_CMD_EFUSE_BUFFER_MODE:
+-- 
+2.53.0
+

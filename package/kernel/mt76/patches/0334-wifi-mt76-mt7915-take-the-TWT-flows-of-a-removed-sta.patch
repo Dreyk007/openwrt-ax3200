@@ -1,0 +1,50 @@
+From 22c089bd83bc74625087814d08da56a8b6d397cf Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Thu, 19 Nov 2026 13:43:40 +0100
+Subject: [PATCH 334/345] wifi: mt76: mt7915: take the TWT flows of a removed
+ station off twt_list
+
+mt7915_mac_twt_teardown_flow() keeps a flow on dev->twt_list if the
+delete command fails, for example while a reset is pending, and
+mt7915_mac_sta_remove() does not take the remaining flows off the list.
+The list then holds flows inside a station that mac80211 frees, and the
+next TWT setup reads them in mt7915_mac_twt_sched_list_add().
+
+Take the remaining flows of a station off the list at its removal.
+
+Fixes: 3782b69d03e7 ("mt76: mt7915: introduce mt7915_mac_add_twt_setup routine")
+Link: https://patch.msgid.link/20261119124352.1842164-8-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 22c089bd83bc74625087814d08da56a8b6d397cf)
+---
+ mt7915/main.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/mt7915/main.c b/mt7915/main.c
+index 28fd2ddd..d06a6929 100644
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -878,10 +878,20 @@ void mt7915_mac_sta_remove(struct mt76_dev *mdev, struct ieee80211_vif *vif,
+ {
+ 	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
+ 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
++	int i;
+ 
+ 	mt7915_mac_wtbl_update(dev, msta->wcid.idx,
+ 			       MT_WTBL_UPDATE_ADM_COUNT_CLEAR);
+ 
++	/* the firmware can still hold an agreement whose delete failed, so
++	 * its table entry stays counted
++	 */
++	for (i = 0; i < ARRAY_SIZE(msta->twt.flow); i++) {
++		if (msta->twt.flowid_mask & BIT(i))
++			list_del_init(&msta->twt.flow[i].list);
++	}
++	msta->twt.flowid_mask = 0;
++
+ 	spin_lock_bh(&mdev->sta_poll_lock);
+ 	if (!list_empty(&msta->wcid.poll_list))
+ 		list_del_init(&msta->wcid.poll_list);
+-- 
+2.53.0
+

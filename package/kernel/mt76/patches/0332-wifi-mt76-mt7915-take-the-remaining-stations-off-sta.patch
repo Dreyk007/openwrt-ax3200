@@ -1,0 +1,41 @@
+From 4d24c73d71f6dfb78cb6c067aaccd74d3b04215f Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Thu, 19 Nov 2026 13:43:37 +0100
+Subject: [PATCH 332/345] wifi: mt76: mt7915: take the remaining stations off
+ sta_rc_list at reset
+
+mt7915_mac_full_reset() runs INIT_LIST_HEAD() on dev->sta_rc_list while
+stations can still be on it. A removal of such a station before the
+replay then corrupts the list.
+
+Take the remaining stations off the list under sta_poll_lock, as
+mt76_reset_device() does for sta_poll_list.
+
+Fixes: 065c79df595a ("wifi: mt76: mt7915: fix list corruption after hardware restart")
+Link: https://patch.msgid.link/20261119124352.1842164-5-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 4d24c73d71f6dfb78cb6c067aaccd74d3b04215f)
+---
+ mt7915/mac.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mt7915/mac.c b/mt7915/mac.c
+index 06cddffa..dfe4d839 100644
+--- a/mt7915/mac.c
++++ b/mt7915/mac.c
+@@ -1460,7 +1460,11 @@ mt7915_mac_full_reset(struct mt7915_dev *dev)
+ 
+ 	mt76_reset_device(&dev->mt76);
+ 
+-	INIT_LIST_HEAD(&dev->sta_rc_list);
++	spin_lock_bh(&dev->mt76.sta_poll_lock);
++	while (!list_empty(&dev->sta_rc_list))
++		list_del_init(dev->sta_rc_list.next);
++	spin_unlock_bh(&dev->mt76.sta_poll_lock);
++
+ 	INIT_LIST_HEAD(&dev->twt_list);
+ 
+ 	i = mt76_wcid_alloc(dev->mt76.wcid_mask, MT7915_WTBL_STA);
+-- 
+2.53.0
+

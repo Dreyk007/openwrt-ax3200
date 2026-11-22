@@ -1,0 +1,111 @@
+From aa7fc23961a115cf1cc54db7f19ef9bcda269438 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Tue, 17 Nov 2026 19:01:27 +0100
+Subject: [PATCH 341/344] wifi: mt76: check the PN of a BA session frame at its
+ release
+
+mt76_rx_complete() checks the PN after a frame left the reorder buffer,
+outside tid->lock. The links of an MLD peer share one PN state, so a
+frame released on one RX ring can be checked before an earlier frame of
+the same TID on another ring, which then reads as a replay. The reorder
+work has the same gap on a single link.
+
+Check the PN of a BA session frame where it leaves the reorder buffer,
+under tid->lock. mt76_rx_complete() still checks all other frames.
+
+Fixes: 30ce7f4456ae ("mt76: validate rx CCMP PN")
+Fixes: 62694ed0b76f ("wifi: mt76: check the RX PN of an MLD peer once per peer")
+Reviewed-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Link: https://patch.msgid.link/20261117180134.2940930-12-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit aa7fc23961a115cf1cc54db7f19ef9bcda269438)
+---
+ agg-rx.c   | 11 +++++++++++
+ mac80211.c |  6 ++++--
+ mt76.h     |  3 ++-
+ 3 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/agg-rx.c b/agg-rx.c
+index 3d34caf7..58967fbc 100644
+--- a/agg-rx.c
++++ b/agg-rx.c
+@@ -12,6 +12,15 @@ static unsigned long mt76_aggr_tid_to_timeo(u8 tidno)
+ 	return HZ / (tidno >= 4 ? 25 : 10);
+ }
+ 
++static void
++mt76_rx_aggr_pn_check(struct sk_buff *skb)
++{
++	struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
++
++	mt76_check_ccmp_pn(skb);
++	status->skip_pn_check = true;
++}
++
+ static void
+ mt76_aggr_release(struct mt76_rx_tid *tid, struct sk_buff_head *frames, int idx)
+ {
+@@ -25,6 +34,7 @@ mt76_aggr_release(struct mt76_rx_tid *tid, struct sk_buff_head *frames, int idx)
+ 
+ 	tid->reorder_buf[idx] = NULL;
+ 	tid->nframes--;
++	mt76_rx_aggr_pn_check(skb);
+ 	__skb_queue_tail(frames, skb);
+ }
+ 
+@@ -204,6 +214,7 @@ void mt76_rx_aggr_reorder(struct sk_buff *skb, struct sk_buff_head *frames)
+ 	}
+ 
+ 	if (seqno == head) {
++		mt76_rx_aggr_pn_check(skb);
+ 		tid->head = ieee80211_sn_inc(head);
+ 		if (tid->nframes)
+ 			mt76_rx_aggr_release_head(tid, frames);
+diff --git a/mac80211.c b/mac80211.c
+index ff3bd685..6627c36b 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -1383,8 +1383,7 @@ mt76_rx_convert(struct mt76_dev *dev, struct sk_buff *skb,
+ 	*hw = mt76_phy_hw(dev, mstat.phy_idx);
+ }
+ 
+-static void
+-mt76_check_ccmp_pn(struct sk_buff *skb)
++void mt76_check_ccmp_pn(struct sk_buff *skb)
+ {
+ 	struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
+ 	struct mt76_wcid *wcid = status->wcid;
+@@ -1398,6 +1397,9 @@ mt76_check_ccmp_pn(struct sk_buff *skb)
+ 	if (status->flag & RX_FLAG_ONLY_MONITOR)
+ 		return;
+ 
++	if (status->skip_pn_check)
++		return;
++
+ 	if (!wcid || !wcid->rx_check_pn)
+ 		return;
+ 
+diff --git a/mt76.h b/mt76.h
+index 10abe1ae..eaab9afb 100644
+--- a/mt76.h
++++ b/mt76.h
+@@ -773,7 +773,7 @@ struct mt76_rx_status {
+ 		} eht;
+ 	};
+ 
+-	u8 amsdu:1, first_amsdu:1, last_amsdu:1;
++	u8 amsdu:1, first_amsdu:1, last_amsdu:1, skip_pn_check:1;
+ 	u8 rate_idx;
+ 	u8 nss:5, band:3;
+ 	s8 signal;
+@@ -1809,6 +1809,7 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
+ void mt76_rx_poll_complete(struct mt76_dev *dev, enum mt76_rxq_id q,
+ 			   struct napi_struct *napi);
+ void mt76_rx_aggr_reorder(struct sk_buff *skb, struct sk_buff_head *frames);
++void mt76_check_ccmp_pn(struct sk_buff *skb);
+ void mt76_testmode_tx_pending(struct mt76_phy *phy);
+ void mt76_queue_tx_complete(struct mt76_dev *dev, struct mt76_queue *q,
+ 			    struct mt76_queue_entry *e);
+-- 
+2.53.0
+

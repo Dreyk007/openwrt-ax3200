@@ -1,0 +1,198 @@
+From 6a2f14547f724e6c4f882cfb44e81f04e6e82357 Mon Sep 17 00:00:00 2001
+From: Eason Lai <eason.lai@mediatek.com>
+Date: Wed, 28 Oct 2026 10:10:52 +0800
+Subject: [PATCH 337/345] wifi: mt76: flush a partial rx A-MSDU when its
+ station is removed
+
+mt76_rx_release_burst() keeps the first subframe of an A-MSDU in
+phy->rx_amsdu[q] until the last subframe arrives, which can take several
+polls. mt76_rx_status.wcid in that skb is only valid inside the RCU
+section it was filled in.
+
+If the station is removed meanwhile, the wcid is freed together with the
+sta, and mt76_rx_convert() and mt76_check_ccmp_pn() use a dangling
+pointer once the A-MSDU is released. Neither mt76_rx_aggr_stop() nor
+__mt76_sta_remove() looks at rx_amsdu.
+
+Drop a parked A-MSDU that references the wcid in mt76_wcid_cleanup(),
+which every driver calls on station removal, and protect rx_amsdu with a
+new per-queue lock.
+
+The flush alone does not close the race. A poll can move the A-MSDU to
+dev->rx_skb[] just before the flush and still use the wcid when mac80211
+frees the sta. mt7996 and mt7925 also remove MLO links without a grace
+period before mt76_wcid_cleanup(), so a poll can park a frame after the
+flush. Thus also drop an A-MSDU on release if its wcid is no longer
+published in dev->wcid[], as mt76_airtime_flush_ampdu() does for the
+wcid that it keeps across polls. A published wcid stays valid for the
+RCU section of the poll.
+
+End a burst when the wcid of a subframe differs, so that the check of
+the first subframe covers all subframes.
+
+Fixes: cc4b3c139ad3 ("mt76: mt7915: enable hw rx-amsdu de-aggregation")
+Signed-off-by: Eason Lai <eason.lai@mediatek.com>
+Link: https://patch.msgid.link/20261028021053.2220951-2-eason.lai@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 6a2f14547f724e6c4f882cfb44e81f04e6e82357)
+---
+ mac80211.c | 76 ++++++++++++++++++++++++++++++++++++++++++++++++++----
+ mt76.h     |  2 ++
+ 2 files changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/mac80211.c b/mac80211.c
+index 4378d285..977af265 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -428,9 +428,12 @@ mt76_phy_init(struct mt76_phy *phy, struct ieee80211_hw *hw)
+ {
+ 	struct mt76_dev *dev = phy->dev;
+ 	struct wiphy *wiphy = hw->wiphy;
++	int i;
+ 
+ 	INIT_LIST_HEAD(&phy->tx_list);
+ 	spin_lock_init(&phy->tx_lock);
++	for (i = 0; i < ARRAY_SIZE(phy->rx_amsdu); i++)
++		spin_lock_init(&phy->rx_amsdu[i].lock);
+ 	INIT_DELAYED_WORK(&phy->roc_work, mt76_roc_complete_work);
+ 
+ 	if ((void *)phy != hw->priv)
+@@ -598,6 +601,54 @@ int mt76_register_phy(struct mt76_phy *phy, bool vht,
+ }
+ EXPORT_SYMBOL_GPL(mt76_register_phy);
+ 
++static struct sk_buff *
++mt76_rx_amsdu_detach(struct mt76_phy *phy, enum mt76_rxq_id q)
++{
++	struct sk_buff *skb = phy->rx_amsdu[q].head;
++
++	phy->rx_amsdu[q].head = NULL;
++	phy->rx_amsdu[q].tail = NULL;
++
++	return skb;
++}
++
++static struct sk_buff *
++mt76_rx_amsdu_detach_wcid(struct mt76_phy *phy, enum mt76_rxq_id q,
++			  struct mt76_wcid *wcid)
++{
++	struct sk_buff *skb = phy->rx_amsdu[q].head;
++
++	if (!skb || ((struct mt76_rx_status *)skb->cb)->wcid != wcid)
++		return NULL;
++
++	return mt76_rx_amsdu_detach(phy, q);
++}
++
++static void
++mt76_rx_amsdu_flush_phy(struct mt76_phy *phy, struct mt76_wcid *wcid)
++{
++	int q;
++
++	for (q = 0; q < ARRAY_SIZE(phy->rx_amsdu); q++) {
++		struct sk_buff *skb;
++
++		spin_lock_bh(&phy->rx_amsdu[q].lock);
++		skb = mt76_rx_amsdu_detach_wcid(phy, q, wcid);
++		spin_unlock_bh(&phy->rx_amsdu[q].lock);
++
++		dev_kfree_skb(skb);
++	}
++}
++
++static void mt76_rx_amsdu_flush(struct mt76_dev *dev, struct mt76_wcid *wcid)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(dev->phys); i++)
++		if (dev->phys[i])
++			mt76_rx_amsdu_flush_phy(dev->phys[i], wcid);
++}
++
+ void mt76_unregister_phy(struct mt76_phy *phy)
+ {
+ 	struct mt76_dev *dev = phy->dev;
+@@ -892,13 +943,20 @@ EXPORT_SYMBOL_GPL(mt76_vif_phy);
+ 
+ static void mt76_rx_release_amsdu(struct mt76_phy *phy, enum mt76_rxq_id q)
+ {
+-	struct sk_buff *skb = phy->rx_amsdu[q].head;
++	struct sk_buff *skb = mt76_rx_amsdu_detach(phy, q);
+ 	struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
+ 	struct mt76_dev *dev = phy->dev;
+ 	struct mt76_queue *rxq = &dev->q_rx[q];
+ 
+-	phy->rx_amsdu[q].head = NULL;
+-	phy->rx_amsdu[q].tail = NULL;
++	/* status->wcid was looked up in an earlier RCU section. It can only be
++	 * used if the wcid is still published, which keeps it alive until the
++	 * end of the current RCU section.
++	 */
++	if (status->amsdu && status->wcid &&
++	    __mt76_wcid_ptr(dev, phy->rx_amsdu[q].wcid_idx) != status->wcid) {
++		dev_kfree_skb(skb);
++		return;
++	}
+ 
+ 	/*
+ 	 * Validate if the amsdu has a proper first subframe.
+@@ -938,15 +996,19 @@ static void mt76_rx_release_burst(struct mt76_phy *phy, enum mt76_rxq_id q,
+ 				  struct sk_buff *skb)
+ {
+ 	struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
++	struct sk_buff *head = phy->rx_amsdu[q].head;
+ 
+-	if (phy->rx_amsdu[q].head &&
++	if (head &&
+ 	    (!status->amsdu || status->first_amsdu ||
+-	     status->seqno != phy->rx_amsdu[q].seqno))
++	     status->seqno != phy->rx_amsdu[q].seqno ||
++	     status->wcid != ((struct mt76_rx_status *)head->cb)->wcid))
+ 		mt76_rx_release_amsdu(phy, q);
+ 
+ 	if (!phy->rx_amsdu[q].head) {
+ 		phy->rx_amsdu[q].tail = &skb_shinfo(skb)->frag_list;
+ 		phy->rx_amsdu[q].seqno = status->seqno;
++		if (status->wcid)
++			phy->rx_amsdu[q].wcid_idx = status->wcid->idx;
+ 		phy->rx_amsdu[q].head = skb;
+ 	} else {
+ 		*phy->rx_amsdu[q].tail = skb;
+@@ -975,7 +1037,9 @@ void mt76_rx(struct mt76_dev *dev, enum mt76_rxq_id q, struct sk_buff *skb)
+ 	}
+ #endif
+ 
++	spin_lock(&phy->rx_amsdu[q].lock);
+ 	mt76_rx_release_burst(phy, q, skb);
++	spin_unlock(&phy->rx_amsdu[q].lock);
+ }
+ EXPORT_SYMBOL_GPL(mt76_rx);
+ 
+@@ -1745,6 +1809,8 @@ void mt76_wcid_cleanup(struct mt76_dev *dev, struct mt76_wcid *wcid)
+ 	struct sk_buff_head list;
+ 	struct sk_buff *skb;
+ 
++	mt76_rx_amsdu_flush(dev, wcid);
++
+ 	mt76_tx_status_lock(dev, &list);
+ 	mt76_tx_status_skb_get(dev, wcid, -1, &list);
+ 	idr_destroy(&wcid->pktid);
+diff --git a/mt76.h b/mt76.h
+index 4788af1b..10abe1ae 100644
+--- a/mt76.h
++++ b/mt76.h
+@@ -914,9 +914,11 @@ struct mt76_phy {
+ 	u8 mac_work_count;
+ 
+ 	struct {
++		spinlock_t lock;
+ 		struct sk_buff *head;
+ 		struct sk_buff **tail;
+ 		u16 seqno;
++		u16 wcid_idx;
+ 	} rx_amsdu[__MT_RXQ_MAX];
+ 
+ 	struct mt76_freq_range_power *frp;
+-- 
+2.53.0
+

@@ -1,0 +1,89 @@
+From 9a5227284c5ab94788eb41c2f1474e4111cc9708 Mon Sep 17 00:00:00 2001
+From: Eason Lai <eason.lai@mediatek.com>
+Date: Wed, 28 Oct 2026 10:10:53 +0800
+Subject: [PATCH 338/345] wifi: mt76: free a partial rx A-MSDU when the phy is
+ unregistered
+
+mt76_rx_release_burst() keeps the first subframes of an A-MSDU in
+phy->rx_amsdu[q] until the last subframe arrives. If the phy or device
+is unregistered in the meantime, nothing frees this skb and it leaks.
+
+Free any parked A-MSDU after ieee80211_unregister_hw(), once rx has
+stopped.
+
+mt7663u and mt7663s also receive A-MSDUs, but call
+ieee80211_unregister_hw() directly. Use mt76_unregister_device() there,
+like mt7615 on PCI.
+
+Fixes: cc4b3c139ad3 ("mt76: mt7915: enable hw rx-amsdu de-aggregation")
+Signed-off-by: Eason Lai <eason.lai@mediatek.com>
+Link: https://patch.msgid.link/20261028021053.2220951-3-eason.lai@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 9a5227284c5ab94788eb41c2f1474e4111cc9708)
+---
+ mac80211.c    | 7 ++++++-
+ mt7615/sdio.c | 2 +-
+ mt7615/usb.c  | 2 +-
+ 3 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/mac80211.c b/mac80211.c
+index 977af265..f7c1967c 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -618,7 +618,10 @@ mt76_rx_amsdu_detach_wcid(struct mt76_phy *phy, enum mt76_rxq_id q,
+ {
+ 	struct sk_buff *skb = phy->rx_amsdu[q].head;
+ 
+-	if (!skb || ((struct mt76_rx_status *)skb->cb)->wcid != wcid)
++	if (!skb)
++		return NULL;
++
++	if (wcid && ((struct mt76_rx_status *)skb->cb)->wcid != wcid)
+ 		return NULL;
+ 
+ 	return mt76_rx_amsdu_detach(phy, q);
+@@ -660,6 +663,7 @@ void mt76_unregister_phy(struct mt76_phy *phy)
+ 		mt76_led_cleanup(phy);
+ 	mt76_tx_status_check(dev, true);
+ 	ieee80211_unregister_hw(phy->hw);
++	mt76_rx_amsdu_flush_phy(phy, NULL);
+ 	dev->phys[phy->band_idx] = NULL;
+ }
+ EXPORT_SYMBOL_GPL(mt76_unregister_phy);
+@@ -860,6 +864,7 @@ void mt76_unregister_device(struct mt76_dev *dev)
+ 	mt76_tx_status_check(dev, true);
+ 	mt76_wcid_cleanup(dev, &dev->global_wcid);
+ 	ieee80211_unregister_hw(hw);
++	mt76_rx_amsdu_flush(dev, NULL);
+ }
+ EXPORT_SYMBOL_GPL(mt76_unregister_device);
+ 
+diff --git a/mt7615/sdio.c b/mt7615/sdio.c
+index 46188951..99c64b24 100644
+--- a/mt7615/sdio.c
++++ b/mt7615/sdio.c
+@@ -176,7 +176,7 @@ static void mt7663s_remove(struct sdio_func *func)
+ 	if (!test_and_clear_bit(MT76_STATE_INITIALIZED, &dev->mphy.state))
+ 		return;
+ 
+-	ieee80211_unregister_hw(dev->mt76.hw);
++	mt76_unregister_device(&dev->mt76);
+ 	mt76s_deinit(&dev->mt76);
+ 	mt76_free_device(&dev->mt76);
+ }
+diff --git a/mt7615/usb.c b/mt7615/usb.c
+index d91feffa..31bff6de 100644
+--- a/mt7615/usb.c
++++ b/mt7615/usb.c
+@@ -207,7 +207,7 @@ static void mt7663u_disconnect(struct usb_interface *usb_intf)
+ 	if (!test_bit(MT76_STATE_INITIALIZED, &dev->mphy.state))
+ 		return;
+ 
+-	ieee80211_unregister_hw(dev->mt76.hw);
++	mt76_unregister_device(&dev->mt76);
+ 	mt7663u_cleanup(dev);
+ 
+ 	usb_set_intfdata(usb_intf, NULL);
+-- 
+2.53.0
+

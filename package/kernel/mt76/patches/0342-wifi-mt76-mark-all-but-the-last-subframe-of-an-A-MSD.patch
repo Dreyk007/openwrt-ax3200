@@ -1,0 +1,45 @@
+From 06025c1cab20bb8aba788d502a43687882f120e7 Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Tue, 17 Nov 2026 19:01:25 +0100
+Subject: [PATCH 342/344] wifi: mt76: mark all but the last subframe of an
+ A-MSDU chain
+
+mt76_rx_complete() passes the subframes of a hardware-split A-MSDU to
+mac80211 without RX_FLAG_AMSDU_MORE. They share the sequence control of
+the MPDU, so in 802.11 format ieee80211_rx_h_check_dup() drops the later
+subframes of a retransmitted A-MSDU as duplicates.
+
+Set RX_FLAG_AMSDU_MORE on every subframe but the last.
+
+Fixes: cc4b3c139ad3 ("mt76: mt7915: enable hw rx-amsdu de-aggregation")
+Reviewed-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Link: https://patch.msgid.link/20261117180134.2940930-10-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 06025c1cab20bb8aba788d502a43687882f120e7)
+[refresh context after dropping 3115dbc9]
+---
+ mac80211.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mac80211.c b/mac80211.c
+index ce44b7cd..c981475f 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -1619,6 +1619,8 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
+ 		mt76_check_ccmp_pn(skb);
+ 		skb_shinfo(skb)->frag_list = NULL;
+ 		mt76_rx_convert(dev, skb, &hw, &sta);
++		if (nskb)
++			IEEE80211_SKB_RXCB(skb)->flag |= RX_FLAG_AMSDU_MORE;
+ 		ieee80211_rx_list(hw, sta, skb, &list);
+ 
+ 		/* subsequent amsdu frames */
+@@ -1628,6 +1630,8 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
+ 			skb->next = NULL;
+ 
+ 			mt76_rx_convert(dev, skb, &hw, &sta);
++			if (nskb)
++				IEEE80211_SKB_RXCB(skb)->flag |= RX_FLAG_AMSDU_MORE;
+ 			ieee80211_rx_list(hw, sta, skb, &list);
+ 		}
+ 	}

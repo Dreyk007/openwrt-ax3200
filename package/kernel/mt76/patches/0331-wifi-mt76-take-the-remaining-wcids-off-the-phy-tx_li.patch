@@ -1,0 +1,42 @@
+From 2c2df658a5575060816e3e970699f87c332119ec Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Thu, 19 Nov 2026 13:43:35 +0100
+Subject: [PATCH 331/345] wifi: mt76: take the remaining wcids off the phy
+ tx_list at reset
+
+mt76_reset_device() runs INIT_LIST_HEAD() on each phy->tx_list while
+wcids that are not in dev->wcid[] can still be on it, such as a station
+between .sta_pre_rcu_remove and its removal. The later
+mt76_wcid_cleanup() of such a wcid then corrupts the list.
+
+Take the remaining wcids off the list under the tx_lock.
+
+Fixes: 065c79df595a ("wifi: mt76: mt7915: fix list corruption after hardware restart")
+Link: https://patch.msgid.link/20261119124352.1842164-3-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+[replace phy->dev->tx_lock with phy->tx_lock]
+(cherry picked from commit 2c2df658a5575060816e3e970699f87c332119ec)
+---
+ mac80211.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mac80211.c b/mac80211.c
+index adeb8de5..4378d285 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -829,7 +829,11 @@ static void mt76_reset_phy(struct mt76_phy *phy)
+ 	if (!phy)
+ 		return;
+ 
+-	INIT_LIST_HEAD(&phy->tx_list);
++	spin_lock_bh(&phy->tx_lock);
++	while (!list_empty(&phy->tx_list))
++		list_del_init(phy->tx_list.next);
++	spin_unlock_bh(&phy->tx_lock);
++
+ 	phy->num_sta = 0;
+ 	phy->chanctx = NULL;
+ 	mt76_roc_complete(phy);
+-- 
+2.53.0
+
