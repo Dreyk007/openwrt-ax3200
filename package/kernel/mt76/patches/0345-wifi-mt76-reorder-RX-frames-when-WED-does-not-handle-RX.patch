@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Sun, 22 Nov 2026 09:01:00 +0200
+Subject: [PATCH] wifi: mt76: reorder RX frames when WED does not handle RX
+
+mt76_rx_poll_complete() skips mt76_rx_aggr_reorder() whenever
+mtk_wed_device_active(&dev->mmio.wed) is true. However, MT7622 WED v1
+only offloads TX: mtk_wed_get_rx_capa(&dev->mmio.wed) returns false, the
+RX DMA rings stay host-managed, and mt7915_mcu_init_firmware() queries
+MCU_WA_PARAM_CMD(CAPABILITY) rather than configuring WED RX offload.
+
+On MT7622 with an MT7915 card and mt7915e wed_enable=1, 5 GHz Block Ack
+frames reach mt76_rx_poll_complete() unreordered whenever WED is
+attached. Out-of-order MPDUs therefore hit mt76_check_ccmp_pn() with
+IV < last PN and are marked RX_FLAG_ONLY_MONITOR. On a 160 MHz AX client
+upload benchmark on MT7622 + MT7915 with WED v1 active, debug counters
+recorded 2171 single and 5661 A-MSDU 802.3 frames falsely marked as PN
+replays (out of 228603 total passed frames) with out-of-order BA
+sequence numbers visible in kernel logs, while with WED detached they
+dropped to 7 single and 0 A-MSDU marks. Once mt76 frees
+RX_FLAG_ONLY_MONITOR 802.3 frames in mt76_rx_complete() (commit
+3115dbc9eedf ("wifi: mt76: free a replayed 802.3 frame with all its
+subframes")), 5 GHz client upload throughput collapses from ~840 Mbit/s
+to ~109-123 Mbit/s with ~7000 TCP retransmissions per 15 s run.
+
+Only bypass mt76_rx_aggr_reorder() for WED when
+mtk_wed_get_rx_capa(&dev->mmio.wed) is also true. This matches the
+predicate already used by mt7915 and mt7996 for RX offload setup and
+keeps the bypass intact on MT7986 (WED v2 with WO) and MT7988/MT7996
+(WED v3 with HWRRO) where WED/firmware handles RX reordering, as well as
+for mt76_npu_device_active(dev).
+---
+ mac80211.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mac80211.c b/mac80211.c
+index c981475f..a4b21011 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -1658,7 +1658,8 @@ void mt76_rx_poll_complete(struct mt76_dev *dev, enum mt76_rxq_id q,
+ 
+ 	while ((skb = __skb_dequeue(&dev->rx_skb[q])) != NULL) {
+ 		mt76_check_sta(dev, skb);
+-		if (mtk_wed_device_active(&dev->mmio.wed) ||
++		if ((mtk_wed_device_active(&dev->mmio.wed) &&
++		     mtk_wed_get_rx_capa(&dev->mmio.wed)) ||
+ 		    mt76_npu_device_active(dev))
+ 			__skb_queue_tail(&frames, skb);
+ 		else
+-- 
+2.53.0

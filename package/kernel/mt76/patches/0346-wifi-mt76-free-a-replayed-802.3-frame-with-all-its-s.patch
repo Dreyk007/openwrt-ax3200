@@ -1,0 +1,61 @@
+From 3115dbc9eedfa2d37b1e14c0bfb396e58263efbf Mon Sep 17 00:00:00 2001
+From: Felix Fietkau <nbd@nbd.name>
+Date: Wed, 18 Nov 2026 17:18:17 +0100
+Subject: [PATCH] wifi: mt76: free a replayed 802.3 frame with all its
+ subframes
+
+mt76_check_ccmp_pn() marks a replayed frame with RX_FLAG_ONLY_MONITOR,
+as the drivers mark a frame with an ICV or MIC error. mac80211 honours
+the flag only in its monitor path. A frame in 802.3 format does not take
+that path, so such a frame reaches the network stack. The flag also sits
+on the first subframe of an A-MSDU only, and mac80211 does not check the
+other subframes, because the IV is stripped.
+
+Free an 802.3 frame that is marked for monitor interfaces only, with all
+its subframes, and mark each subframe of such a frame in 802.11 format.
+
+Fixes: 3c1032e12217 ("mt76: allow receiving frames with invalid CCMP PN via monitor interfaces")
+Link: https://patch.msgid.link/20261118161827.1208649-6-nbd@nbd.name
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 3115dbc9eedfa2d37b1e14c0bfb396e58263efbf)
+[refresh context after 06025c1cab20]
+---
+ mac80211.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/mac80211.c b/mac80211.c
+index a4b21011..8f9d1234 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -1615,10 +1615,18 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
+ 
+ 	spin_lock(&dev->rx_lock);
+ 	while ((skb = __skb_dequeue(frames)) != NULL) {
++		struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
+ 		struct sk_buff *nskb = skb_shinfo(skb)->frag_list;
++		bool only_monitor;
+ 
+ 		mt76_check_ccmp_pn(skb);
++		only_monitor = status->flag & RX_FLAG_ONLY_MONITOR;
++		if (only_monitor && (status->flag & RX_FLAG_8023)) {
++			dev_kfree_skb(skb);
++			continue;
++		}
++
+ 		skb_shinfo(skb)->frag_list = NULL;
+ 		mt76_rx_convert(dev, skb, &hw, &sta);
+ 		if (nskb)
+ 			IEEE80211_SKB_RXCB(skb)->flag |= RX_FLAG_AMSDU_MORE;
+@@ -1629,6 +1637,10 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
+ 			nskb = nskb->next;
+ 			skb->next = NULL;
+ 
++			status = (struct mt76_rx_status *)skb->cb;
++			if (only_monitor)
++				status->flag |= RX_FLAG_ONLY_MONITOR;
++
+ 			mt76_rx_convert(dev, skb, &hw, &sta);
+ 			if (nskb)
+ 				IEEE80211_SKB_RXCB(skb)->flag |= RX_FLAG_AMSDU_MORE;
+-- 
+2.53.0
