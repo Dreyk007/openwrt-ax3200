@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Thu, 19 Nov 2026 17:37:01 +0200
+Subject: [PATCH] wifi: mt76: reset operating channel survey on software scan
+
+__mt76_set_channel() clears chan_state only when tuning to a channel
+other than main_chandef.chan. As a result, a software scan (including
+ACS when a radio is restarted) finds the operating channel with hours
+of accumulated active, busy, TX, and BSS-RX history, while every other
+channel covers only the scan dwell. Traffic from the AP's own clients
+then makes the current channel look busy compared to idle channels.
+
+In mt76_sw_scan(), take dev->mutex, fold any pending hardware counters
+and elapsed time into the current state via mt76_update_survey(), and
+then zero the main channel's chan_state under dev->cc_lock. On MT7615 and
+MT7915, mt76_update_survey() updates the MIB/state_ts baselines before
+zeroing chan_state so no counts are lost or double-counted across the
+scan boundary.
+
+Side effects on survey consumers in this image:
+- LuCI (network.js / luci-bwc.c) reads only the noise floor, not channel
+  active/busy times.
+- collectd-mod-iwinfo reads bitrate, signal, noise, quality, and
+  associated station count via libiwinfo (src/iwinfo.c), not channel
+  active/busy times; when noise is absent it submits 0.
+- hostapd BSS Load is on (bss_load_update_period defaults to 60 in the
+  wifi-scripts schema). hostapd takes a utilization sample only when
+  channel_time and channel_time_busy grow, so the interval that spans a
+  reset gives no sample, and the next one counts from the new values.
+- usteer is not in the image.
+- After the reset, state->noise is 0 so the in-use channel omits
+  SURVEY_INFO_NOISE_DBM ("noise:") until the next mt76_update_survey().
+  On wl0 (2.4 GHz, mt7615e), mt76_get_survey() and mt7615_mac_work()
+  (every 100 ms) refresh it immediately once on channel (measured 4 ms
+  after scan trigger on ch 1; absent only while off-channel during scan).
+  On wl1 (5 GHz, mt7915e), mt7915_phy_get_nf() returns 0 so "noise:"
+  is already absent at rest and across 9 s post-scan.
+---
+ mac80211.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/mac80211.c b/mac80211.c
+index 7d27f952..7755e71b 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -1963,6 +1963,19 @@ void mt76_sw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 		  const u8 *mac)
+ {
+ 	struct mt76_phy *phy = hw->priv;
++	struct mt76_dev *dev = phy->dev;
++
++	mutex_lock(&dev->mutex);
++	mt76_update_survey(phy);
++	if (phy->main_chandef.chan) {
++		struct mt76_channel_state *state;
++
++		state = mt76_channel_state(phy, phy->main_chandef.chan);
++		spin_lock_bh(&dev->cc_lock);
++		memset(state, 0, sizeof(*state));
++		spin_unlock_bh(&dev->cc_lock);
++	}
++	mutex_unlock(&dev->mutex);
+ 
+ 	set_bit(MT76_SCANNING, &phy->state);
+ }
