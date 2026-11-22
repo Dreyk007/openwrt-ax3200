@@ -5,6 +5,30 @@ but deferred. The status of what was submitted upstream is in the table at the e
 [AGENTS.md](AGENTS.md#upstream-contributions); the measurements are in [RESEARCH.md](RESEARCH.md).
 Remove an item when it is done.
 
+## To submit upstream
+
+Changes of this fork that belong upstream and are not submitted yet. The owner reviews, signs off
+and submits them ([AGENTS.md](AGENTS.md#upstream-contributions)). Once one is submitted, move it
+to the table there.
+
+- **openwrt/packages, `net/https-dns-proxy`:** the update to upstream HEAD and the `0002` fix (items
+  below), one PR to master, then the backport to 25.12.
+- **openwrt/openwrt `[25.12]`: netifd 2026-10-28 or newer.** With it pppd sends Terminate-Request
+  and PADT on a sysupgrade (our `0001`–`0006`). Main already has it.
+- **openwrt/openwrt: kernel `981`** (`e7b01bc0202a`, a fix for OpenWrt's own lockless patch
+  `623`). Submit it to `[25.12]`, and to main if main still carries `623` without the fix.
+- **openwrt/openwrt: `ppp6-up`** adds no `<iface>_6` next to a configured DHCPv6 interface on the
+  same link (GitHub issue #1, [RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab)).
+  Main first, then `[25.12]`.
+- **To check before proposing:** whether OpenWrt main or 6.12 stable already has the ppp/pppoe
+  fixes `979`, `980`, `982`, `983`, and the merged PPPoE GRO of `984` in place of the pending `650`.
+- **bridger:** optionally "bridger: update to Git HEAD (2026-10-27)" (below).
+- **openwrt/uclient (`uclient-fetch.c`):** `uclient-fetch` exits with `0` when `SIGTERM` ends a
+  transfer because `uloop_run()` catches `SIGTERM` via `uloop_handle_sigint()` and returns the
+  signal number, while `uclient-fetch.c:953` ignores `uloop_run()`'s return value and leaves
+  `error_ret` at `0` (`uclient-fetch.c:979` in `openwrt/uclient` master), so a caller cannot tell a
+  killed transfer from a finished one.
+
 ## When upstream merges
 
 - **Pablo Neira Ayuso's "netfilter: flowtable: retrieve stats on flow deletion"** (nf-next v4,
@@ -64,9 +88,50 @@ Remove an item when it is done.
   master's. One submission covers the Archer A5 v4 build too, which carries the same patch. Drop it
   once the feed of the build has the fix; the `doh_backup` cleanup in `99-custom-settings` stays
   for configurations of earlier builds.
+- **https-dns-proxy update (`feeds-patches/packages/0003-…`).** While the upstream connection was
+  down, both proxies of 2026.05.06 exited every few seconds with `[F] dns_poller.c:39 c-ares needed
+  more IO event handler, than the number of provided nameservers: 2`. procd restarted them without
+  limit: 50 times in 3.5 minutes of a 7-minute outage on the PPPoE bench. DNS still came back within
+  4 s of the connection, so the loop filled the log without delaying the recovery.
+  - **The fix.** Upstream `63c49b4` "Fix bootstrap socket watcher exhaustion" allocates the
+    watchers on demand. `0003` takes upstream HEAD `e83e0b6118` (2026-10-19).
+  - **Checked on the router (2026-11-22).** The proxies' own packets were cut off for 6 minutes:
+    marked by uid in output and dropped at the egress of `wan`, so sends succeed and the packets
+    vanish, as in an outage.
+    - The old binary from `/rom` ran on another port as the control. It hit the fatal error after
+      3 min 48 s and exited 46 times in the next 3.5 minutes.
+    - The two instances of 2026.10.19 kept their PIDs and answered as soon as the cut ended.
+    - Dropping in the output hook instead returns an error to `sendto()` at once and does not
+      trigger the loop, not even with the old binary.
+  - **The PR to openwrt/packages:** the update first, then the `0002` fix with `PKG_RELEASE` 2.
+  - **Drop** `0003` once the feed pins `63c49b4` or newer.
+  - **Upgrade without a reboot.** The init script maps `restart` to `reload`, and procd keeps
+    instances whose command line did not change. So `apk upgrade` leaves the old binary running
+    until `stop` and `start` or a reboot.
+- **netifd patches (`package/network/config/netifd/patches/000[1-6]`).** A sysupgrade left the
+  PPPoE session open at the ISP: procd stops netifd before stage2, and netifd 2026-02-26 of 25.12
+  ended pppd with SIGKILL, before its Terminate-Request and PADT (lab: no PADT with r15's netifd,
+  Terminate-Request and PADT with the patches, [RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab)).
+  OpenWrt main has the fix with netifd 2026-10-28. Drop the patches once 25.12's netifd contains
+  `2922ee8232`; propose that netifd update for 25.12 meanwhile.
 - **bridger version.** The build has `4b63ed4` (2026-10-27), OpenWrt main has `2a2d126`. Do not go back
   when OpenWrt updates the package. Optionally submit "bridger: update to Git HEAD (2026-10-27)" to
   OpenWrt.
+- **`0345` (`package/kernel/mt76/patches/0345-wifi-mt76-reorder-RX-frames-when-WED-does-not-handle-RX.patch`) for `linux-wireless` (`mt76`).**
+  Owner sends it upstream: `mt76_rx_poll_complete()` checks only `mtk_wed_device_active()` before
+  skipping `mt76_rx_aggr_reorder()`, so checking `mtk_wed_get_rx_capa()` as well restores RX
+  reordering on MT7622 + MT7915 when `mt7915e wed_enable=1` (WED v1, TX offload only), without
+  changing MT7986 (WED v2 with WO) or MT7988/MT7996 (WED v3 with HWRRO). Note that only MT7622 with
+  `wed_enable` hits this (OpenWrt leaves `wed_enable` off by default). Drop `0345` once upstream
+  `mt76` carries it.
+  - **Before sending:** with `0345`, a station that uploads at 800 Mbit/s and scans in the
+    background gets ~100 ms stalls of its own TID about every 2–3 s, against every ~11 s without
+    `0345`; at 400 Mbit/s practically none
+    ([RESEARCH.md section 10](RESEARCH.md#10-wi-fi-driver-fixes-from-mt76-master)).
+    - **Not the router's doing.** A debug build showed that the router does not hold these
+      frames: no reorder timeout fired. The stalls form in the client's queue.
+    - **Not WED-specific either.** OpenWrt's default without WED behaves the same.
+    - So they do not hold up the submission.
 
 ## Deferred
 
@@ -122,12 +187,64 @@ Remove an item when it is done.
   WAN down until `ifup wan`, and after `insmod` 5 GHz runs without WED until a reboot. Normal
   operation never unloads the module; it matters for module tests. Take `a57185c5` if module
   swaps are needed more often, and test then whether the Ethernet reset remains.
-- **xl2tpd only when an L2TP interface comes up.** It runs from boot and the L2TP modules stay
-  loaded although no interface uses them (796 kB resident on the router, 2026-11-15).
-  `/lib/netifd/proto/l2tp.sh` starts xl2tpd itself. The Archer A5 v4 build drops its start at
-  boot (feed patch `0003-xl2tpd-do-not-start-at-boot`) and the `AUTOLOAD` of `kmod-l2tp` and
-  `kmod-pppol2tp` in `netsupport.mk` (branch `task/l2tp-fixes` of openwrt-archer-a5v4-c50v4). Small
-  gain at 256 MB; take it with an L2TP test on the router.
+- **mt76 master commits not taken into `0330`–`0346`** (checked against `39c960c3` + `0063`–`0329`,
+  [RESEARCH.md section 10](RESEARCH.md#10-wi-fi-driver-fixes-from-mt76-master)):
+  - `7474835` ("mt7615: skip MT_TXD5_TX_STATUS_HOST for group frames", reported against MT7663e):
+    `mt7615_mac_write_txwi()` requests host TX status on non-beacon frames for all MT7615/MT7622/MT7663
+    chips, and on MT7622 (`MT7615_FIRMWARE_V2`, `!mt7615_firmware_offload()`) mac80211 handles PS
+    buffering instead of firmware offload; cannot verify from code whether closed MT7622 N9
+    firmware shares MT7663's DTIM queue stall, so left out unless a group-traffic stall appears.
+  - `3c17c4d` ("check the RX PN of CCMP-256, GCMP and GCMP-256 keys"): depends on the earlier
+    `sta_key_conf` rework (`62694ed0b76f`) not present in `39c960c3`; take if backporting that
+    rework or updating mt76.
+  - `0241c2b` ("remove a replayed station from the driver before the add"): requires checking
+    interaction with `0067-wifi-mt76-add-wcid-publish-check-in-mt76_sta_add.patch` (kept from
+    25.12), which already guards re-adds via `mt76_sta_add()`; revisit if mac80211 debugfs
+    `reset` station replay matters.
+- **MT7915 full firmware recovery (`echo 7 > /sys/kernel/debug/ieee80211/wl1/mt76/sys_recovery`)
+  fails to bring 5 GHz back** (seen on both 25.12's mt76 `fbd08ee272` and the updated mt76
+  `d962f2553d`): `mt7915_mac_restart()` times out on `PATCH_SEM` (`0x00000010`) and then
+  `MCU_EXT_CMD(FW_LOG_2_HOST)` (`0x000013ed`) across all 10 attempts (`chip full reset failed`),
+  leaving `wl1-ap0` `DOWN` (`Out of memory` on `wifi up` until a reboot). Consequence: if the
+  MT7915 firmware crashes in use and escalates beyond L1 recovery to a full chip reset, 5 GHz
+  stays down until the router is rebooted. To investigate: guess is an interaction with WED v1 on
+  MT7622 during `mt7915_dma_reset()` / `mtk_wed_device_stop()`.
+- **~100 ms stalls of a heavy uploader during its scans.** Under an upload of 800 Mbit/s the
+  laptop's own TID 0 traffic stalls for 80–110 ms about every 2–3 s, only while it scans in the
+  background; traffic in another TID does not stall. With `0345` this happens ~4× as often as
+  without it, with WED on or off
+  ([RESEARCH.md section 10](RESEARCH.md#10-wi-fi-driver-fixes-from-mt76-master)).
+  - **Not the router's reorder buffer.** A debug build (44 runs) showed no reorder timeout and no
+    window overflow:
+    - holes closed within 20 ms, rarely within 60 ms;
+    - runs without any late hole still had stalls;
+    - no QoS Null, BlockAckReq or driver drop left a hole.
+
+    The stalls form in the laptop's TID 0 queue during its off-channel dwells.
+  - **Why `0345` makes them more frequent: the TCP window** (tested). With in-order frames the
+    laptop's window grows from 3.5–5.1 to 7.7–10.7 MiB. Capping it at C's size
+    (`iperf3 -w 256K`) or using UDP removed the stalls. Nothing to fix on the router.
+  - **Two states.** The rate varies about 3× from boot to boot: ~26 against ~5–9 stalls per
+    minute.
+    - The high state came with a higher full-speed upload (1370–1430 against 1220–1240 Mbit/s) at
+      the same MCS, and with longer absences of the laptop during scans.
+    - Four connections in the debug build were all high; the cause is unknown.
+  - **A timer flaw in `agg-rx.c`** (found by an outside review, confirmed in the code).
+    - **The flaw:** the reorder work is not cancelled when the buffer empties. When it then wakes
+      for a newer hole, nothing has expired yet, and it re-arms a full timeout from that moment.
+    - **Its effect:** a hole could wait up to ~200 ms. A fresh work runs on the 11th jiffy, because
+      the timer wheel rounds up (`calc_index()`).
+    - **Seen here:** the debug build saw such early wake-ups (`early_rearm`), but no hole lasted
+      long enough to matter.
+    - **The fix:** schedule from the oldest buffered frame, as mac80211 does in
+      `ieee80211_sta_reorder_release()`, and queue the work only while frames are buffered. Small;
+      an upstream candidate.
+  - **Not useful:** a shorter reorder timeout. The router never reached it here, and with a client
+    that retransmits after a ~50 ms dwell it would turn late frames into drops.
+- **Update check: HTTPS-only redirects (`luci-app-fwupdate`).** `uclient-fetch` (`uclient_http_redirect()`)
+  follows any `Location` URL regardless of scheme and has no flag like curl's `--proto-redir =https`
+  to refuse `https` → `http` downgrades. Left open until `uclient` adds a scheme restriction or
+  `fwupdate` switches client.
 - **DoH with the clock behind.** dnsmasq asks only the DoH proxies (`noresolv`), and NTP resolves
   its servers by name. If the clock at boot is earlier than the start of validity of the
   certificate of cloudflare-dns.com or dns.google, TLS fails, no name resolves and NTP cannot
@@ -135,89 +252,76 @@ Remove an item when it is done.
   the router (with the owner's OK): how the clock comes back after a reboot and after a power cut
   (RTC of the MT7622, `sysfixtime`), then set it a few months back and restart the service. If
   it gets stuck: NTP servers by IP address, or start the proxies only after the first NTP sync.
-- **https-dns-proxy crashes in a loop while the WAN is down.**
-  - **Seen on 2026-11-21** in the log of a WAN outage (PPPoE, 2026.05.06-r1). Both proxies exited
-    about every 9 s with `[F] dns_poller.c:39 c-ares needed more IO event handler, than the number
-    of provided nameservers: 2`, and procd restarted them until the WAN came back. DoH was dead
-    for that time, and the log filled. The crash follows an outage; it does not cause one.
-  - **The cause.** The poller allocates one libev watcher per bootstrap server; `-b` gets only the
-    two IPv4 ones. It exits (`FLOG`) when c-ares opens more sockets than that, which it can do
-    while queries fail.
-  - **Upstream fix.** `63c49b405d` "Fix bootstrap socket watcher exhaustion" (2026-09-09)
-    allocates the watchers on demand. `116655073f` and `dd5f52a81b` fix the same poller later.
-    The feed, in both 25.12 and master, still pins `0ba0525fa7` (2026.05.06).
-  - **The fix.** Update the package to upstream HEAD (`e83e0b6118`, 2026-10-19), or take
-    `63c49b405d` as a patch.
-    - Submit the update to openwrt/packages together with the `0002` feed patch.
-    - Check it (with the owner's OK): cut the WAN for a few minutes and watch
-      `logread -f | grep https-dns-proxy`.
 - **zapret2 through Zapret Manager.** The README section "zapret (only if you use it)" and
-  RESEARCH §14 were tested with ZM 5.004 and zapret v1 (2026-11-04). ZM 5.089 can install zapret2
-  instead (`/opt/zapret2`, `/etc/config/zapret2`, `nfqws2` with Lua strategies). To check:
-  - **What ZM installs by default.** Does it still change the fw4 offload rule to
-    `ct original packets ge 30` for zapret2?
-  - **The settings it writes.** An install of 2026-11-21 had:
-    - `NFQWS2_PORTS_TCP=80,443,853,1024-65535` and `NFQWS2_PORTS_UDP=53,80,88,443,1024-65535`;
-    - `NFQWS2_TCP_PKT_OUT=25`;
-    - `POSTNAT=1`, which also queues the router's own traffic, DNS included;
-    - `MODE_FILTER=none`.
-  - **The strategies `games_udp` and `games_tcp`.** They cover almost every UDP port above 1024
-    and many TCP game ports, and send 8–10 fake packets for each of the first three packets of a
-    flow.
-    - Are they on by default, or opt-in?
-    - With torrents or Steam that means thousands of flows. Measure the CPU of `nfqws2`, the drops
-      in `/proc/net/netfilter/nfnetlink_queue` and the packet rate on `wan`.
-  - **The §14 test.** Repeat it: fake ClientHellos on `wan`, wired and Wi-Fi clients, all four
-    modes.
+  RESEARCH §14 were tested with ZM 5.004 and zapret v1 (2026-11-04). ZM 5.089 installs zapret2
+  (`/opt/zapret2`, `nfqws2` with Lua strategies).
+  - **Measured on the PPPoE bench on 2026-11-22** ([RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab)):
+    - ZM applies the 30-packet rule itself;
+    - bulk traffic keeps its throughput and the PPE;
+    - its defaults turn on `games_udp` and `games_tcp`;
+    - many new UDP flows multiply the WAN packets by 11 and raise the ping maximum from about 27 to about 110 ms;
+    - at 1,000 new flows/s `nfqws2` takes one core.
+  - **Still to do:**
+    - the §14 test with zapret2: fake ClientHellos on `wan`, wired and Wi-Fi clients, all four modes;
+    - a line in README.md and README.ru.md that the game strategies are on by default and cost latency with torrents;
+    - RESEARCH §14.
 
-  Then update README.md, README.ru.md and RESEARCH §14. Installing it on the owner's router needs
-  the owner's OK.
+  Installing it on the owner's router needs the owner's OK.
 - **Update check: its own message for exit code 7.** With the uclient patches `uclient-fetch`
   exits with 7 on a response it cannot parse. `fetch()` in `luci-app-fwupdate` treats every code
   except 8 as no connection, so the page says "no connection to GitHub" then.
-- **sysupgrade leaves the PPPoE session open at the ISP.**
-  - **The cause.** `stage2` does not stop `network` on devices with more than 32 MB of RAM,
-    so nothing runs `ifdown`. `kill_remaining TERM` then reaches netifd, and netifd sends
-    SIGKILL to its `proto_task` pppd (`main.c` `netifd_kill_processes()`) before pppd sends its
-    PADT.
-  - **Measured on 2026-11-16** on a lab PPPoE server, with r15 flashed over r15 and the settings
-    kept:
-    - no Term-Request and no PADT left the router;
-    - the PADI after the boot came 52 s later, while the server still held the old session;
-    - a `reboot` sent Term-Request and PADT within 0.075 s (`ifdown -a` in `/etc/init.d/network`).
-  - **The effect.** An ISP with one session per login may reject the new login with
-    `AUTH_TOPEER_FAILED` until its own timeout closes the old session. netifd retries about
-    twice a second (`authfail` 0).
-  - **The fix to try.** In `stage2`, bring the ppp-proto interfaces down before
-    `kill_remaining`.
-    - Check it with the same lab test: a real sysupgrade with a session up.
-    - It is an upstream bug: submit it to OpenWrt as well.
-    - The bench and the logs are in the task `pppoe-auth` of the agents folder.
-- **SQM on PPPoE: offloaded downloads may skip the shaper.**
-  - **The cause (to confirm).** The *SQM* operating mode puts SQM on `pppoe-wan`
-    (`wan_device()` in `tuning.uc`) and switches to software flow offloading. fw4 puts the
-    zone's Ethernet port into the flowtable, not `pppoe-wan`. So the fast path takes an
-    offloaded PPPoE download in at the port, PPPoE header and all, and the download never passes
-    the tc ingress of `pppoe-wan`, where sqm-scripts redirects it to `ifb4pppoe-wan`.
-  - **What stays shaped.** Uploads still leave through `pppoe-wan` and stay shaped. So do the
-    first packets of each connection, before it is offloaded.
-  - **Where this comes from.** MilkFlint (below) describes and fixes it in `36937d7b60`.
-    [RESEARCH.md section 9](RESEARCH.md#9-wan-bufferbloat-and-the-need-for-sqm) measured SQM
-    with software offloading on a DHCP WAN only.
-  - **Check** on a lab PPPoE server (the bench of the sysupgrade item above): the *SQM* mode
-    with PPPoE, and a download well above the set rate. Compare the bytes in
-    `tc -s qdisc show dev ifb4pppoe-wan` with the download, and the throughput with the rate.
-  - **Fix to try:** shape the Ethernet device (`network.wan.device`, e.g. `wan` or `wan.500`)
-    instead of `pppoe-wan`.
-    - Its tc ingress runs before the netfilter ingress hook of the flowtable, as on a DHCP WAN,
-      where section 9 saw the CAKE counters grow with offloading on.
-    - CAKE then gets PPPoE frames, so check that it still tells the flows apart and how it
-      counts the extra headers.
-    - Measure again.
-  - **MilkFlint's fix** is two patches, not upstream:
-    - a kernel patch (543 lines): the fast path of `nft_flow_offload` stops at a device with tc
-      ingress;
-    - a fw4 patch that adds `pppoe-wan` to the flowtable (`d831baba6e`).
+- **PPPoE bench and tests.** The PPPoE changes of 2026-11-21 (kernel `979`–`987`, ppp 2.5.5,
+  `ppp6-up`, the netifd patches, SQM on the WAN device) passed the lab over `br-lan` and the bench
+  on the `wan` port: a PC in line between the ONT and the router, as the ISP's BRAS
+  (accel-ppp). Both are in [RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab).
+  - **Covered:**
+    - the operating modes;
+    - accounting;
+    - reconnects;
+    - the loss of LCP and of IP traffic;
+    - sysupgrade against a server that refuses a second session, r15 against the netifd patches;
+    - IPv6 prefix delegation and client traffic;
+    - zapret2;
+    - the internet throughput against DHCP.
+  - **Still open:** a real ISP. The 4PDA report of 2026-11-20 (PPPoE up, no IP traffic, fixed by
+    restarting wan): on the bench the router recovered from the same state by itself.
+  - **The bench:**
+    - scripts `bench-gw.sh` (the ISP side: the USB NIC with the router's WAN MAC, NAT) and
+      `bench-pppoe.sh` (accel-ppp in Docker; `LCP_INTERVAL`/`LCP_FAILURE` set how long the server
+      keeps a silent session) in `temp_workdir/pppoe-test/lab/`;
+    - the PC is reached through the router over IPv6 link-local on `wan`.
+  - **Upstream:** `981` and the `ppp6-up` fix are listed under "To submit upstream".
+- **5 GHz Wi-Fi loses 0.6–1 % of the packets at 600–700 Mbit/s.**
+  - **What was seen.** On the PPPoE bench (2026-11-22, *Balanced*, laptop with an Intel AX card
+    at -47 dBm, 160 MHz):
+    - every wired hop and the router's kernel dropped nothing;
+    - between the router's `wan` and the laptop 4,451–5,379 packets per 12 s got lost, as many
+      as the server retransmitted, with 92–111k `tx failed` of the station.
+  - **What it costs.** At LAN latency TCP hides it (650–710 Mbit/s). At 10 ms one stream gets
+    about 260 Mbit/s and 8 streams about 410; at 40 ms 125 and 265. To a CDN 10 ms away 8 streams
+    got 395–477 Mbit/s, while the PC got 590 by cable. Speedtest with 12–16 connections
+    still reaches the tariff.
+  - **To check:**
+    - the same in *Low latency* (WED off) and on 80 MHz;
+    - with the mt76 of OpenWrt 25.12 without the fixes of [RESEARCH.md section 10](RESEARCH.md#10-wi-fi-driver-fixes-from-mt76-master);
+    - with another client;
+    - the counters of `ethtool -S wl1-ap0` (`tx_retry_failed`, `tx_mpdu_attempts`) per run.
+
+    A local iperf3 with netem 10 ms on the server reproduces it without the internet.
+- **SQM on PPPoE: CAKE on the WAN device gets PPPoE frames.** The *SQM* mode now shapes
+  `network.wan.device`, not `pppoe-wan`. On `pppoe-wan`, the fast path of software offloading took
+  the downloads in at the netfilter ingress of `wan` and they skipped the shaper: 763 Mbit/s with
+  a 200 Mbit/s limit. On `wan` the same download got 170 Mbit/s
+  ([RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab)). To check there:
+  - whether CAKE still tells the hosts apart (`nat`, `triple-isolate`) when the IP packets come
+    inside PPPoE frames;
+  - which overhead to count (`overhead`, `mpu`; PPPoE adds 8 bytes), and why the download got
+    85 % of the limit (the lab on a PPPoE device got 96 %).
+
+  MilkFlint (below) keeps SQM on `pppoe-wan` instead, with two patches that are not upstream:
+  - a kernel patch (543 lines): the fast path of `nft_flow_offload` stops at a device with tc
+    ingress;
+  - a fw4 patch that adds `pppoe-wan` to the flowtable (`d831baba6e`).
 - **MilkFlint**, the source of the items below: OddBlueDog's OpenWrt 25.12.6 build for the
   GL-MT6000 (MT7986), [forum thread](https://forum.openwrt.org/t/254862),
   [repository](https://github.com/OddBlueDog/openwrt), branch `milkflint-25.12`.
@@ -269,13 +373,6 @@ Remove an item when it is done.
     - `701-03` "skip clearing unused tins during rate adjustment";
     - `760-20`…`760-23`: autorate throttling, reconfiguration serialized with the datapath, the
       parent backlog when a tin is cleared, and encap headers in the qdisc packet length.
-- **Flowtable fixes from 6.14** that 6.12 lacks (MilkFlint `703-01`, `703-02`):
-  - "nft_flow_offload: clear tcp MAXACK flag before moving to slowpath" (`d9d7b489416d`);
-  - "flowtable: add CLOSING state" (`fdbaf5163331`).
-  - They apply to hardware and software offloading alike. No symptom has been seen here.
-  - Check whether 25.12.7's kernel has them.
-  - Take them if TCP connections stall after leaving the fast path, or if closed connections
-    stay in the flowtable.
 - **mt76 2026-10-08 on 25.12.**
   - **Why it is possible now.** Section 10 left the mt76 HEAD out because it needs mac80211 7.2
     APIs. MilkFlint builds mt76 `467ae2e3f1` (the version of OpenWrt main) on 25.12 with:
@@ -285,7 +382,7 @@ Remove an item when it is done.
       `sta_set_airtime_weight` op (`edc8a22ecc`, `c59ef1b709`).
   - **Tested there** only on MT7986, which uses the mt7915 driver, since 2026-10-25. The
     MT7622 WMAC (`mt7615`) has not been tried.
-  - **What it would give.** All of upstream instead of the cherry-picks `0300`–`0317`, with the
+  - **What it would give.** All of upstream instead of the cherry-picks `0300`–`0344` (`0329` is from A5 v4), with the
     Wi-Fi tests of sections 10–12.
   - **MilkFlint's own mt76 patches** (`0004`–`0159`, about 130 without its tests) are not
     upstream. They touch mt7915 and the mt76 core, none `mt7615`. Take single ones only
@@ -316,6 +413,12 @@ Remove an item when it is done.
   - The cherry-picked ca-certificates, musl, dnsmasq, uhttpd, libubox and wifi-scripts commits
     come with it unchanged. It also brings a MT7622 Ethernet probe race fix ("mtk_eth_soc:
     allocate dummy netdev sooner").
+  - `985` and `986` were written against 6.12.112. 6.12.113 brings the timeout rework
+    (`03428ca5cee9`) without these two, and it changes `flow_offload_fixup_ct()` that they
+    touch. Rebuild them in mainline's order (`d9d7b489416d`, then `03428ca5cee9`, then
+    `fdbaf5163331`), keep `NF_FLOW_CLOSING` at the end of the enum, and repeat the accounting
+    tests. `980` and `982` are marked for stable: drop them if the new 6.12.y has
+    them.
   - Since 2026-11-10 the branch has 6.12.116. 6.12.114–116 add two flowtable fixes ("avoid
     num_encaps underflow on bridge VLAN untag", "nf_flow_table: drop existing skb dst before
     skb_dst_set_noref()") in other files than `971`–`975`; check that those still apply at fuzz 0
