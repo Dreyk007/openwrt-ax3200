@@ -298,6 +298,8 @@ For Russian output, use `sh -s -- --lang=ru` instead of `sh`. If the update cann
 
 Attended Sysupgrade, OpenWrt's own update tool, is not part of this build. It can be installed separately, and an update through it works, but the router then moves to plain OpenWrt without the advantages of this build.
 
+**Packages are updated with the firmware.** `apk upgrade` (or *Upgrade…* in *System → Software*) is not the `apt upgrade` of desktop Linux: OpenWrt itself [advises against upgrading packages](https://openwrt.org/meta/infobox/upgrade_packages_warning), and on this build it also does harm. The versions in the OpenWrt repository are stock builds, without the fixes and compiler optimisations of this build ([section 1](#1-compiler-and-cpu-arm-cortex-a53)), and every upgraded package takes flash space a second time, because the original stays in the firmware image. The next release of this build updates the image's packages, and **Keep my packages** installs current versions of yours.
+
 ---
 
 ## SQM or Hardware Offloading?
