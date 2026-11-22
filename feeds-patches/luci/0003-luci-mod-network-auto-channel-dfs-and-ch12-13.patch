@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Thu, 19 Nov 2026 22:09:34 +0200
+Subject: [PATCH] luci-mod-network: add auto-channel checkboxes for DFS and channels 12-13
+
+Add two checkboxes under General Setup for mac80211 radios when the
+channel is set to auto:
+- 2.4 GHz: toggle channels between 1-13 and 1-11 (preserve custom lists);
+- 5 GHz: toggle acs_exclude_dfs between 0 (included) and 1 (excluded).
+
+Both options set retain=true so fixed-channel saves do not remove
+stored ACS presets, with Russian translations in luci-base.
+---
+ modules/luci-base/po/ru/base.po               | 20 ++++++++
+ .../resources/view/network/wireless.js        | 46 +++++++++++++++++++
+ 2 files changed, 66 insertions(+)
+
+diff --git a/modules/luci-base/po/ru/base.po b/modules/luci-base/po/ru/base.po
+index faa63a5..c7ccc43 100644
+--- a/modules/luci-base/po/ru/base.po
++++ b/modules/luci-base/po/ru/base.po
+@@ -15721,3 +15721,23 @@ msgstr "{example_nx} возвращает {nxdomain}."
+ #: modules/luci-compat/luasrc/view/cbi/delegator.htm:20
+ msgid "« Back"
+ msgstr "« Назад"
++
++#: modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++msgid "Include channels 12 and 13 in automatic channel selection"
++msgstr "Автовыбор включая каналы 12 и 13"
++
++#: modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++msgid "Some devices, for example those set up for the USA, do not use channels 12 and 13; where the country does not allow them, the box changes nothing."
++msgstr "Некоторые устройства, например настроенные для США, не используют каналы 12 и 13; в странах, где они запрещены, галочка ничего не меняет."
++
++#: modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++msgid "Custom channel list (%s) is kept unchanged"
++msgstr "Свой список каналов (%s) оставлен без изменений"
++
++#: modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++msgid "Include DFS channels in automatic channel selection"
++msgstr "Автовыбор включая DFS-каналы"
++
++#: modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++msgid "DFS channels need a radar check of 1 to 10 minutes before the access point starts, and the access point must leave the channel when a radar appears. Where every 5 GHz channel needs a radar check, automatic selection works only with this box on."
++msgstr "Для DFS-каналов перед запуском точки доступа нужна проверка радаров от 1 до 10 минут, а при обнаружении радара точка доступа должна покинуть канал. Там, где все каналы 5 ГГц требуют проверки радаров, автовыбор работает только с этой галочкой."
+diff --git a/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js b/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
+index 7ad2e0a..5c2e9a7 100644
+--- a/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++++ b/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
+@@ -1021,6 +1021,52 @@ return view.extend({
+ 				o.ucisection = s.section;
+ 
+ 				if (hwtype == 'mac80211') {
++					const devName = radioNet.getWifiDeviceName();
++					const devChannels = uci.get('wireless', devName, 'channels');
++					const chanStr = Array.isArray(devChannels) ? devChannels.join(' ') : (devChannels || '');
++					const customChannels = (chanStr !== '' && chanStr !== '1-13' && chanStr !== '1-11');
++
++					if (customChannels) {
++						o = ss.taboption('general', form.DummyValue, '_acs_channels_custom',
++							_('Include channels 12 and 13 in automatic channel selection'),
++							_('Some devices, for example those set up for the USA, do not use channels 12 and 13; where the country does not allow them, the box changes nothing.'));
++						o.depends({ '_freq': /,2g,auto$/ });
++						o.cfgvalue = L.bind(function(val) {
++							return _('Custom channel list (%s) is kept unchanged').format(val);
++						}, o, chanStr);
++						o.write = function() {};
++						o.remove = function() {};
++					} else {
++						o = ss.taboption('general', form.Flag, 'channels',
++							_('Include channels 12 and 13 in automatic channel selection'),
++							_('Some devices, for example those set up for the USA, do not use channels 12 and 13; where the country does not allow them, the box changes nothing.'));
++						o.depends({ '_freq': /,2g,auto$/ });
++						o.enabled = '1-13';
++						o.disabled = '1-11';
++						o.default = '1-13';
++						o.rmempty = false;
++						o.retain = true;
++						o.cfgvalue = function(section_id) {
++							const v = uci.get('wireless', section_id, 'channels');
++							if (Array.isArray(v))
++								return (v[0] != null && v[0] !== '') ? v[0] : '1-13';
++							return (v != null && v !== '') ? v : '1-13';
++						};
++						o.write = function(section_id, formvalue) {
++							uci.set('wireless', section_id, 'channels', [ formvalue ]);
++						};
++					}
++
++					o = ss.taboption('general', form.Flag, 'acs_exclude_dfs',
++						_('Include DFS channels in automatic channel selection'),
++						_('DFS channels need a radar check of 1 to 10 minutes before the access point starts, and the access point must leave the channel when a radar appears. Where every 5 GHz channel needs a radar check, automatic selection works only with this box on.'));
++					o.depends({ '_freq': /^(?!(?:VHT|HE|EHT)160,|EHT320,)[^,]*,5g,auto$/ });
++					o.enabled = '0';
++					o.disabled = '1';
++					o.default = '0';
++					o.rmempty = false;
++					o.retain = true;
++
+ 					o = ss.taboption('general', form.Flag, 'legacy_rates', _('Allow legacy 802.11b rates'), _('Legacy or badly behaving devices may require legacy 802.11b rates to interoperate. Airtime efficiency may be significantly reduced where these are used. It is recommended to not allow 802.11b rates where possible.'));
+ 					o.depends({'_freq': '2g', '!contains': true});
+ 
+-- 
+2.53.0
+
