@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dreyk <dreyksmail@gmail.com>
+Date: Fri, 13 Nov 2026 23:25:00 +0200
+Subject: [PATCH] xl2tpd: do not start at boot
+
+/lib/netifd/proto/l2tp.sh starts xl2tpd on demand with
+/etc/init.d/xl2tpd restart when its control pipe or process is missing,
+so starting it at boot only spends RAM on routers without an L2TP WAN.
+A UCI change of xl2tp still triggers a reload once the service is
+running; a router running xl2tpd as an LNS server can start it from
+/etc/rc.local.
+---
+ net/xl2tpd/files/xl2tpd.init | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/net/xl2tpd/files/xl2tpd.init b/net/xl2tpd/files/xl2tpd.init
+index a6d7f1c..5e44092 100644
+--- a/net/xl2tpd/files/xl2tpd.init
++++ b/net/xl2tpd/files/xl2tpd.init
+@@ -94,6 +94,13 @@ service_triggers() {
+ 	procd_add_reload_trigger xl2tp
+ }
+ 
++boot() {
++	# /lib/netifd/proto/l2tp.sh starts xl2tpd on demand when an L2TP
++	# interface comes up, so do not keep it in RAM on routers without L2TP.
++	# An LNS server can add /etc/init.d/xl2tpd start to /etc/rc.local.
++	return 0
++}
++
+ start_service() {
+ 	rm -rf "$RUN_D"
+ 	mkdir -p "$RUN_D"

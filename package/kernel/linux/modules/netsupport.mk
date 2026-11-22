@@ -666,7 +666,6 @@ define KernelPackage/pppol2tp
   DEPENDS:=kmod-ppp +kmod-pppox +kmod-l2tp
   KCONFIG:=CONFIG_PPPOL2TP
   FILES:=$(LINUX_DIR)/net/l2tp/l2tp_ppp.ko
-  AUTOLOAD:=$(call AutoProbe,l2tp_ppp)
 endef
 
 define KernelPackage/pppol2tp/description
@@ -1176,7 +1175,6 @@ define KernelPackage/l2tp
 	CONFIG_L2TP_DEBUGFS=n
   FILES:=$(LINUX_DIR)/net/l2tp/l2tp_core.ko \
 	$(LINUX_DIR)/net/l2tp/l2tp_netlink.ko
-  AUTOLOAD:=$(call AutoLoad,32,l2tp_core l2tp_netlink)
 endef
 
 define KernelPackage/l2tp/description
