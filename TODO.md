@@ -391,6 +391,57 @@ to the table there.
 
 ## Next releases
 
+- **Update page: a fresh check before an update (`luci-app-fwupdate`).**
+  - **The problem.** The page shows the result of the last check and does not check when it
+    opens. "Update now" downloads `st.latest` from `status.json`, however old that check is.
+    - **Seen on 2026-11-23.** A local r16 candidate had last checked before r16 was published, so
+      r15 was the latest. The interval was monthly. The first click installed r15; only r15's
+      check after its boot found r16.
+    - **On release builds.** Only newer releases are offered, but after two releases the button
+      can install the older of them.
+  - **The change:**
+    - **On load,** `fwupdate.js` runs a check when `status.checked` is more than an hour old, and
+      shows "checking…" until it ends.
+    - **Before the download,** `download()` in `usr/libexec/fwupdate` reads `release.json` again.
+      If its tag differs from `st.latest.tag`, it writes the new status and stops with its own
+      error. The page then shows the new release and asks for another click, so what gets
+      installed is what the page showed.
+  - New strings go into `po/`. Test with a test server (`fwupdate.settings.url`) that changes its
+    `release.json` between the page load and the click.
+- **Update page: "Keep my packages" always visible (`luci-app-fwupdate`).**
+  - **Now:** `renderRelease()` in `fwupdate.js` hides the checkbox when `packageCount()` is 0,
+    i.e. when the user added and removed no packages. Users who have not installed anything yet do
+    not learn that the feature exists.
+  - **The change:** show it disabled as "Keep my packages (0)", with a tooltip saying that there is
+    nothing to keep. With packages it stays as it is: checked, with the count. The confirmation
+    dialog and `upgrade()` keep sending `packages` only when the count is above 0.
+- **watchcat defaults: restart `wan` instead of a reboot after 6 hours.**
+  - **Now.** The image ships watchcat enabled (`/etc/rc.d/S97watchcat`) with the package default:
+    `ping_reboot`, `8.8.8.8`, `period 6h`. The router only reboots after six hours without a reply.
+  - **Why change it.** In the 4PDA report on r14 the PPPoE session stayed up with no IP traffic
+    for up to 56 minutes, until the user restarted `wan`. On the PPPoE bench the router recovered
+    by itself once the traffic came back, but a real ISP may not resume it
+    ([RESEARCH.md section 15](RESEARCH.md#15-pppoe-through-the-router-lab)).
+  - **One host is fragile.** If `8.8.8.8` alone stops answering for six hours, for example
+    because an ISP or a route drops it, the router reboots although the internet works. The same
+    user had drops once or twice a day; after replacing `8.8.8.8` with `77.88.8.8` and `1.1.1.1`
+    they saw none "so far" (2026-11-23). `watchcat.sh` counts the check as passed when any host
+    answers.
+  - **The change.**
+    - A `restart_iface` section for `wan`: restart it after 3–5 minutes without a reply from
+      any of three addresses of different operators, by IP so that DNS does not matter:
+      `1.1.1.1` (Cloudflare), `8.8.8.8` (Google) and `9.9.9.9` (Quad9, a non-profit; all three
+      are anycast and answer ping). No regional resolver such as Yandex's: it is blocked in some
+      places.
+    - Keep or drop the 6 h reboot: decide after the test.
+    - Set it in `99-custom-settings` with its own `ax3200.defaults` flag, and only when
+      `/etc/config/watchcat` still equals the package default, so that a user's own setting stays.
+  - **To test on the router:**
+    - block the WAN's IP traffic but not the PPPoE or DHCP frames: `wan` must be restarted
+      once per period and come back with the traffic;
+    - during a long ISP outage the restarts must not pile up or reboot the router;
+    - the DHCP WAN of the owner, and PPPoE on a bench if one is up again;
+    - LuCI's watchcat page shows the new section.
 - **25.12.7 (Linux 6.12.113 or newer).** Merge the tag, not the branch: a newer kernel on 25.12.6
   stops the official kmods from loading. On 2026-10-31 `openwrt-25.12` merged into `xq-25.12`
   without conflicts.
